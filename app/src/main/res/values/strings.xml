@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">Overlay Cam</string>
+    <string name="pick_image">Pick Image</string>
+    <string name="reset">Reset</string>
+    <string name="camera_permission_rationale">Camera permission is required.</string>
+    <string name="opacity">Opacity</string>
+</resources>

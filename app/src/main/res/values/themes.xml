@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<resources>
+  <!-- App theme based on MDC (works without Compose M3 XML themes) -->
+  <style name="Theme.OverlayCam" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+    <!-- Optional edge-to-edge -->
+    <item name="android:statusBarColor">@android:color/transparent</item>
+    <item name="android:navigationBarColor">@android:color/transparent</item>
+  </style>
+</resources>

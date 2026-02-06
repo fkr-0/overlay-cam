@@ -1,0 +1,16 @@
+version: "3.9"
+
+services:
+  build:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: overlay-cam:android
+    working_dir: /work
+    volumes:
+      - ./:/work
+      - gradle-cache:/.gradle
+    command: bash -lc "./scripts/gradle-in-docker.sh assembleDebug"
+
+volumes:
+  gradle-cache:
