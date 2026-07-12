@@ -2,9 +2,9 @@ package com.example.overlaycam
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
@@ -24,12 +24,12 @@ import androidx.compose.ui.unit.dp
 internal fun PermissionRequestInProgress() {
     PermissionScreenShell(
         title = "Camera permission",
-        message = "Approve the Android permission sheet to use the live camera preview for recreation matching.",
+        message = "Complete the Android permission request to enable the live camera preview.",
     ) {
         CircularProgressIndicator()
         Spacer(Modifier.height(16.dp))
         Text(
-            text = "Waiting for system permission…",
+            text = "Waiting for Android…",
             textAlign = TextAlign.Center,
             style = MaterialTheme.typography.bodyLarge,
         )
@@ -37,17 +37,46 @@ internal fun PermissionRequestInProgress() {
 }
 
 @Composable
-internal fun PermissionDeniedPrompt(
+internal fun CameraAccessChoice(
+    wasDenied: Boolean,
     onRequest: () -> Unit,
+    onContinueWithPhotos: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     PermissionScreenShell(
-        title = "Camera access needed",
-        message = "Overlay Cam needs the camera to freeze the recreated scene. You can retry the permission prompt or open Android settings if it was denied permanently.",
+        title = if (wasDenied) "Camera access is off" else "How would you like to start?",
+        message = if (wasDenied) {
+            "You can retry camera access, continue with photos, or open Android settings if permission was permanently denied."
+        } else {
+            "Use the live camera to freeze a scene, or continue with photos only. Photo mode works without camera access."
+        },
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = onRequest) { Text("Retry permission") }
-            OutlinedButton(onClick = onOpenSettings) { Text("Open settings") }
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 360.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Button(
+                onClick = onRequest,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(if (wasDenied) "Retry camera access" else "Use live camera")
+            }
+            OutlinedButton(
+                onClick = onContinueWithPhotos,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Continue with photos")
+            }
+            if (wasDenied) {
+                OutlinedButton(
+                    onClick = onOpenSettings,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Open Android settings")
+                }
+            }
         }
     }
 }

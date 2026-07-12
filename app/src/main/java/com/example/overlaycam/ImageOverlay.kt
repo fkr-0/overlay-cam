@@ -37,9 +37,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -59,6 +56,7 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.ContentScale
@@ -71,6 +69,7 @@ import androidx.compose.ui.semantics.semantics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.lifecycle.viewmodel.compose.viewModel
 import java.text.SimpleDateFormat
 import java.util.Locale
 
@@ -80,50 +79,52 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
-    CameraPermissionGate {
+    CameraPermissionGate { cameraAvailable, requestCameraAccess ->
+        val editor: OverlayEditorViewModel = viewModel()
         var handle by remember { mutableStateOf<CameraHandle?>(null) }
         var previewSize by remember { mutableStateOf(IntSize(1, 1)) }
 
-        var backgroundUri by remember { mutableStateOf<Uri?>(null) }
-        var backgroundBitmap by remember { mutableStateOf<Bitmap?>(null) }
-        var backgroundImage by remember { mutableStateOf<ImageBitmap?>(null) }
+        var backgroundUri by editor.backgroundUri
+        var backgroundBitmap by editor.backgroundBitmap
+        val backgroundImage = remember(backgroundBitmap) { backgroundBitmap?.asImageBitmap() }
 
-        var overlayUri by remember { mutableStateOf<Uri?>(null) }
-        var overlayBitmap by remember { mutableStateOf<Bitmap?>(null) }
+        var overlayUri by editor.overlayUri
+        var overlayBitmap by editor.overlayBitmap
         var backgroundLoadInProgress by remember { mutableStateOf(false) }
         var overlayLoadInProgress by remember { mutableStateOf(false) }
         var saveInProgress by remember { mutableStateOf(false) }
 
         val minScale = 0.5f
         val maxScale = 2.0f
-        var opacity by remember { mutableFloatStateOf(0.7f) }
-        var scaleF by remember { mutableFloatStateOf(1f) }
-        var rotationDeg by remember { mutableFloatStateOf(0f) }
-        var offsetX by remember { mutableFloatStateOf(0f) }
-        var offsetY by remember { mutableFloatStateOf(0f) }
+        var opacity by editor.opacity
+        var scaleF by editor.scale
+        var rotationDeg by editor.rotationDegrees
+        var offsetX by editor.offsetX
+        var offsetY by editor.offsetY
 
-        var pointFixMode by remember { mutableStateOf(false) }
-        val pointLocks = remember { mutableStateListOf<FixedPointLock>() }
-        var selectedPointLockIndex by remember { mutableIntStateOf(-1) }
-        var pointFixZoom by remember { mutableFloatStateOf(1f) }
+        var pointFixMode by editor.pointFixMode
+        val pointLocks = editor.pointLocks
+        var pendingPointSource by editor.pendingPointSource
+        var pendingPointScreenPosition by editor.pendingPointScreenPosition
+        var pointFixZoom by editor.pointFixZoom
 
-        var overlayFixedMode by remember { mutableStateOf(false) }
-        var lockedLayerA by remember { mutableStateOf<OverlayLayer?>(null) }
-        var lockedLayerB by remember { mutableStateOf<OverlayLayer?>(null) }
-        var hideAllOverlays by remember { mutableStateOf(false) }
-        var addOverlayPending by remember { mutableStateOf(false) }
-        var flipOverlayAndBackground by remember { mutableStateOf(false) }
-        var frozenOverlayOpacity by remember { mutableFloatStateOf(0.5f) }
+        var overlayFixedMode by editor.overlayFixedMode
+        var lockedLayerA by editor.lockedLayerA
+        var lockedLayerB by editor.lockedLayerB
+        var hideAllOverlays by editor.hideAllOverlays
+        var addOverlayPending by editor.addOverlayPending
+        var flipOverlayAndBackground by editor.flipOverlayAndBackground
+        var frozenOverlayOpacity by editor.frozenOverlayOpacity
 
-        var variantIndex by remember { mutableIntStateOf(0) }
+        var variantIndex by editor.variantIndex
         val variants = EffectVariant.entries
         val variant = variants[variantIndex]
 
         var heatmapBitmap by remember { mutableStateOf<Bitmap?>(null) }
         var heatmapImage by remember { mutableStateOf<ImageBitmap?>(null) }
         var heatmapInstruction by remember { mutableStateOf<DrawingInstruction?>(null) }
-        var heatmapSimilarityThreshold by remember { mutableFloatStateOf(0.85f) }
-        var heatmapPalette by remember { mutableStateOf(HeatmapPalette.Color) }
+        var heatmapSimilarityThreshold by editor.heatmapSimilarityThreshold
+        var heatmapPalette by editor.heatmapPalette
 
         var autoAlignInProgress by remember { mutableStateOf(false) }
         var autoAlignStatus by remember { mutableStateOf<String?>(null) }
@@ -150,15 +151,7 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
 
         DisposableEffect(Unit) {
             onDispose {
-                backgroundBitmap?.takeUnless(Bitmap::isRecycled)?.recycle()
-                listOfNotNull(
-                    overlayBitmap,
-                    lockedLayerA?.bitmap,
-                    lockedLayerB?.bitmap,
-                    heatmapBitmap,
-                ).distinct().forEach { bitmap ->
-                    if (!bitmap.isRecycled) bitmap.recycle()
-                }
+                heatmapBitmap?.takeUnless(Bitmap::isRecycled)?.recycle()
             }
         }
 
@@ -170,7 +163,8 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
             opacity = 0.7f
             if (clearPoints) {
                 pointLocks.clear()
-                selectedPointLockIndex = -1
+                pendingPointSource = null
+                pendingPointScreenPosition = null
             }
             pointFixZoom = 1f
         }
@@ -188,7 +182,7 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
             )
         }
 
-        fun createPointLockAt(tap: Offset): FixedPointLock? {
+        fun overlaySourceAt(tap: Offset): Offset? {
             val bmp = overlayBitmap ?: return null
             if (previewSize.width <= 1 || previewSize.height <= 1) return null
             val matrix = buildOverlayMatrix(
@@ -207,10 +201,7 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
             inverse.mapPoints(mapped)
             val srcX = mapped[0].coerceIn(0f, bmp.width.toFloat())
             val srcY = mapped[1].coerceIn(0f, bmp.height.toFloat())
-            return FixedPointLock(
-                source = Offset(srcX, srcY),
-                target = tap
-            )
+            return Offset(srcX, srcY)
         }
 
         suspend fun loadBitmap(uri: Uri?): Bitmap? = uri?.let {
@@ -261,7 +252,6 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                 }
                 backgroundBitmap?.recycle()
                 backgroundBitmap = bmp
-                backgroundImage = bmp.asImageBitmap()
                 clearOverlayBitmaps()
                 overlayFixedMode = false
                 hideAllOverlays = false
@@ -353,9 +343,14 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
 
         val uiState = OverlayUiState(
             hasStillBackground = hasStillBackground,
+            cameraAvailable = cameraAvailable,
             hasOverlay = currentWorkingLayerOrNull() != null || lockedLayerA != null || lockedLayerB != null,
             isOverlayFixed = overlayFixedMode,
             isPointFixMode = pointFixMode,
+        )
+        val pointMatchUiState = PointMatchUiState(
+            completedPointCount = pointLocks.size,
+            hasPendingOverlayLandmark = pendingPointSource != null,
         )
 
         var showTools by remember { mutableStateOf(false) }
@@ -371,14 +366,11 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
             showTools = false
         }
 
-        BackHandler(enabled = showTools || pointFixMode) {
-            when {
-                showTools -> showTools = false
-                pointFixMode -> {
-                    pointFixMode = false
-                    pointFixZoom = 1f
-                }
-            }
+        BackHandler(enabled = pointFixMode && !showTools) {
+            pointFixMode = false
+            pointFixZoom = 1f
+            pendingPointSource = null
+            pendingPointScreenPosition = null
         }
 
         fun freezeCameraBackground(successMessage: String = "Background frozen") {
@@ -386,7 +378,6 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
             if (bmp != null) {
                 backgroundBitmap?.recycle()
                 backgroundBitmap = bmp
-                backgroundImage = bmp.asImageBitmap()
                 showTools = false
                 coroutineScope.launch { snackbarHostState.showSnackbar(successMessage) }
             } else {
@@ -397,7 +388,6 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
         fun returnToLiveCamera() {
             backgroundBitmap?.recycle()
             backgroundBitmap = null
-            backgroundImage = null
             backgroundUri = null
             overlayFixedMode = false
             clearOverlayBitmaps()
@@ -429,7 +419,8 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
             offsetY = layer.offsetY
             pointLocks.clear()
             pointLocks.addAll(layer.fixedPoints)
-            selectedPointLockIndex = if (pointLocks.isEmpty()) -1 else 0
+            pendingPointSource = null
+            pendingPointScreenPosition = null
             overlayFixedMode = false
             pointFixMode = false
             addOverlayPending = false
@@ -476,6 +467,10 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
         fun runRecommendedAction() {
             when (uiState.recommendedAction) {
                 OverlayRecommendedAction.FreezeFrame -> freezeCameraBackground()
+                OverlayRecommendedAction.PickBackground -> {
+                    showTools = false
+                    launchImagePicker(PickerTarget.Background)
+                }
                 OverlayRecommendedAction.PickOverlay -> {
                     showTools = false
                     launchImagePicker(PickerTarget.Overlay)
@@ -484,6 +479,8 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                 OverlayRecommendedAction.FinishPointFix -> {
                     pointFixMode = false
                     pointFixZoom = 1f
+                    pendingPointSource = null
+                    pendingPointScreenPosition = null
                     showTools = false
                 }
                 OverlayRecommendedAction.SaveImage -> saveCurrentComposite()
@@ -506,13 +503,13 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                     }
             ) {
                 Crossfade(targetState = variant, label = "variant-bg") { currentVariant ->
-                    if (!hasStillBackground) {
+                    if (!hasStillBackground && cameraAvailable) {
                         CameraPreview(
                             modifier = Modifier.fillMaxSize(),
                             isActive = true,
                             bindHandle = { handle = it }
                         )
-                    } else {
+                    } else if (hasStillBackground) {
                         val bg = backgroundImage
                         if (bg != null) {
                             Image(
@@ -524,6 +521,19 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                             )
                         } else {
                             Box(Modifier.fillMaxSize().background(Color.Black))
+                        }
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(MaterialTheme.colorScheme.surface),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = "Choose a background photo to begin",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
                     }
                 }
@@ -539,32 +549,35 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                         }
                         stateDescription = when (uiState.mode) {
                             OverlayUiMode.EditOverlay -> "Drag, pinch, or rotate the overlay"
-                            OverlayUiMode.PointFix -> "${pointLocks.size} of 2 matching points placed"
+                            OverlayUiMode.PointFix -> pointMatchUiState.title
                             OverlayUiMode.FixedOverlay -> variant.label
                             else -> uiState.title
                         }
                     }
                     .then(if (!overlayFixedMode && busyLabel == null) Modifier.transformable(transformState) else Modifier)
-                    .pointerInput(pointFixMode, overlayBitmap, hasStillBackground, selectedPointLockIndex) {
+                    .pointerInput(
+                        pointFixMode,
+                        overlayBitmap,
+                        hasStillBackground,
+                        pendingPointSource,
+                        pointLocks.size,
+                    ) {
                         detectTapGestures { tap ->
                             if (busyLabel == null && !overlayFixedMode && pointFixMode && hasStillBackground && overlayBitmap != null) {
-                                val lock = createPointLockAt(tap) ?: return@detectTapGestures
+                                val pendingSource = pendingPointSource
                                 when {
-                                    selectedPointLockIndex in pointLocks.indices -> {
-                                        pointLocks[selectedPointLockIndex] = lock
+                                    pendingSource != null -> {
+                                        pointLocks.add(FixedPointLock(source = pendingSource, target = tap))
+                                        pendingPointSource = null
+                                        pendingPointScreenPosition = null
                                     }
-                                    pointLocks.size < 2 -> {
-                                        pointLocks.add(lock)
-                                        selectedPointLockIndex = pointLocks.lastIndex
+                                    pointLocks.size >= 2 -> coroutineScope.launch {
+                                        snackbarHostState.showSnackbar("Two landmark pairs are already set")
                                     }
                                     else -> {
-                                        val nearest = pointLocks.indices.minByOrNull { i ->
-                                            val d = pointLocks[i].target - tap
-                                            d.x * d.x + d.y * d.y
-                                        }
-                                        if (nearest != null) {
-                                            pointLocks[nearest] = lock
-                                            selectedPointLockIndex = nearest
+                                        overlaySourceAt(tap)?.let { source ->
+                                            pendingPointSource = source
+                                            pendingPointScreenPosition = tap
                                         }
                                     }
                                 }
@@ -595,9 +608,10 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                         }
                     }
 
-                    if (flipOverlayAndBackground && hasStillBackground && backgroundImage != null) {
+                    val foregroundBackground = backgroundImage
+                    if (flipOverlayAndBackground && hasStillBackground && foregroundBackground != null) {
                         drawImage(
-                            image = backgroundImage!!,
+                            image = foregroundBackground,
                             alpha = frozenOverlayOpacity.coerceIn(0f, 1f),
                             colorFilter = if (variant == EffectVariant.BackgroundInverted) invertComposeColorFilter() else null
                         )
@@ -607,9 +621,17 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                 if (pointFixMode) {
                     pointLocks.forEachIndexed { idx, point ->
                         drawCircle(
-                            color = if (idx == selectedPointLockIndex) Color.Red else if (idx == 0) Color.Cyan else Color.Yellow,
+                            color = if (idx == 0) Color.Cyan else Color.Yellow,
                             radius = 13f,
                             center = point.target
+                        )
+                    }
+                    pendingPointScreenPosition?.let { pending ->
+                        drawCircle(
+                            color = Color.Magenta,
+                            radius = 18f,
+                            center = pending,
+                            style = Stroke(width = 5f),
                         )
                     }
                 }
@@ -624,6 +646,9 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                 OverlayControlDock(
                     state = uiState,
                     busyLabel = busyLabel,
+                    supportingText = pointMatchUiState.title.takeIf {
+                        uiState.mode == OverlayUiMode.PointFix
+                    },
                     opacity = opacity,
                     onOpacityChange = { opacity = it },
                     onRecommendedAction = { runRecommendedAction() },
@@ -649,6 +674,7 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                         enabled = busyLabel == null,
                         onRecommendedAction = { runRecommendedAction() },
                         onFreezeCamera = { freezeCameraBackground("Background refreshed") },
+                        onEnableCamera = requestCameraAccess,
                         onPickBackground = {
                             showTools = false
                             launchImagePicker(PickerTarget.Background)
@@ -718,7 +744,8 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                             onStartPointFix = {
                                 pointFixMode = true
                                 pointFixZoom = 1f
-                                selectedPointLockIndex = if (pointLocks.isEmpty()) -1 else 0
+                                pendingPointSource = null
+                                pendingPointScreenPosition = null
                                 showTools = false
                             },
                         )
@@ -726,10 +753,11 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
 
                     if (uiState.showPointFixPanel) {
                         PointFixPanel(
-                            pointCount = pointLocks.size,
+                            state = pointMatchUiState,
                             onClearPoints = {
                                 pointLocks.clear()
-                                selectedPointLockIndex = -1
+                                pendingPointSource = null
+                                pendingPointScreenPosition = null
                             },
                             onResetZoom = { pointFixZoom = 1f },
                         )

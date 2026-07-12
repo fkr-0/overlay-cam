@@ -10,6 +10,7 @@ enum class OverlayUiMode {
 
 enum class OverlayRecommendedAction {
     FreezeFrame,
+    PickBackground,
     PickOverlay,
     FinishAdjusting,
     FinishPointFix,
@@ -18,6 +19,7 @@ enum class OverlayRecommendedAction {
 
 data class OverlayUiState(
     val hasStillBackground: Boolean,
+    val cameraAvailable: Boolean = true,
     val hasOverlay: Boolean = false,
     val isOverlayFixed: Boolean = false,
     val isPointFixMode: Boolean = false,
@@ -31,15 +33,15 @@ data class OverlayUiState(
     }
 
     val stageLabel: String = when (mode) {
-        OverlayUiMode.Setup -> "LIVE"
-        OverlayUiMode.BackgroundReady -> "READY"
-        OverlayUiMode.EditOverlay -> "EDITING"
+        OverlayUiMode.Setup -> if (cameraAvailable) "LIVE" else "PHOTOS"
+        OverlayUiMode.BackgroundReady -> "BACKGROUND"
+        OverlayUiMode.EditOverlay -> "ALIGN"
         OverlayUiMode.PointFix -> "POINTS"
-        OverlayUiMode.FixedOverlay -> "DONE"
+        OverlayUiMode.FixedOverlay -> "REVIEW"
     }
 
     val title: String = when (mode) {
-        OverlayUiMode.Setup -> "Live camera"
+        OverlayUiMode.Setup -> if (cameraAvailable) "Live camera" else "Photo mode"
         OverlayUiMode.BackgroundReady -> "Background ready"
         OverlayUiMode.EditOverlay -> "Adjust overlay"
         OverlayUiMode.PointFix -> "Match points"
@@ -47,15 +49,23 @@ data class OverlayUiState(
     }
 
     val guidance: String = when (mode) {
-        OverlayUiMode.Setup -> "Hold the camera still, then freeze the frame. You can also use a photo as the background."
+        OverlayUiMode.Setup -> if (cameraAvailable) {
+            "Hold the camera still, then freeze the frame. You can also use a photo as the background."
+        } else {
+            "Choose a background photo to start. Camera access remains optional and can be enabled from Options."
+        }
         OverlayUiMode.BackgroundReady -> "Add the image you want to compare or trace over the frozen background."
         OverlayUiMode.EditOverlay -> "Drag to move, pinch to resize, and twist to rotate. Use the sliders for precise adjustments."
-        OverlayUiMode.PointFix -> "Tap the same landmark on both images, then finish matching."
+        OverlayUiMode.PointFix -> "For each pair, tap a landmark on the overlay first, then tap where it belongs on the background."
         OverlayUiMode.FixedOverlay -> "Save the composite, or reopen the overlay to make another adjustment."
     }
 
     val recommendedAction: OverlayRecommendedAction = when (mode) {
-        OverlayUiMode.Setup -> OverlayRecommendedAction.FreezeFrame
+        OverlayUiMode.Setup -> if (cameraAvailable) {
+            OverlayRecommendedAction.FreezeFrame
+        } else {
+            OverlayRecommendedAction.PickBackground
+        }
         OverlayUiMode.BackgroundReady -> OverlayRecommendedAction.PickOverlay
         OverlayUiMode.EditOverlay -> OverlayRecommendedAction.FinishAdjusting
         OverlayUiMode.PointFix -> OverlayRecommendedAction.FinishPointFix
@@ -64,6 +74,7 @@ data class OverlayUiState(
 
     val recommendedActionLabel: String = when (recommendedAction) {
         OverlayRecommendedAction.FreezeFrame -> "Freeze frame"
+        OverlayRecommendedAction.PickBackground -> "Choose background photo"
         OverlayRecommendedAction.PickOverlay -> "Add overlay image"
         OverlayRecommendedAction.FinishAdjusting -> "Done adjusting"
         OverlayRecommendedAction.FinishPointFix -> "Finish matching"
@@ -71,7 +82,11 @@ data class OverlayUiState(
     }
 
     val recommendedActionHint: String = when (mode) {
-        OverlayUiMode.Setup -> "Hold still, then freeze the camera frame."
+        OverlayUiMode.Setup -> if (cameraAvailable) {
+            "Hold still, then freeze the camera frame."
+        } else {
+            "Choose a photo to use as the background."
+        }
         OverlayUiMode.BackgroundReady -> "Choose an overlay image to begin adjusting it."
         OverlayUiMode.EditOverlay -> "Drag, pinch, or twist directly on the image."
         OverlayUiMode.PointFix -> "Finish when the matching points are placed correctly."

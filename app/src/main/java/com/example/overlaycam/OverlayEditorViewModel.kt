@@ -2,6 +2,7 @@ package com.example.overlaycam
 
 import android.graphics.Bitmap
 import android.net.Uri
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -22,7 +23,8 @@ internal class OverlayEditorViewModel : ViewModel() {
 
     val pointFixMode = mutableStateOf(false)
     val pointLocks = mutableStateListOf<FixedPointLock>()
-    val selectedPointLockIndex = mutableIntStateOf(-1)
+    val pendingPointSource = mutableStateOf<Offset?>(null)
+    val pendingPointScreenPosition = mutableStateOf<Offset?>(null)
     val pointFixZoom = mutableFloatStateOf(1f)
 
     val overlayFixedMode = mutableStateOf(false)

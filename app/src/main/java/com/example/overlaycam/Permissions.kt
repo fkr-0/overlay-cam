@@ -3,28 +3,37 @@ package com.example.overlaycam
 import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.Settings
-import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.LifecycleOwner
 
 @Composable
-fun CameraPermissionGate(content: @Composable () -> Unit) {
+fun CameraPermissionGate(
+    content: @Composable (
+        cameraAvailable: Boolean,
+        requestCameraAccess: () -> Unit,
+    ) -> Unit,
+) {
     val context = LocalContext.current
     val permission = Manifest.permission.CAMERA
 
     var granted by rememberSaveable { mutableStateOf(isCameraPermissionGranted(context)) }
     var systemRequestInFlight by rememberSaveable { mutableStateOf(false) }
     var hasRequestedPermission by rememberSaveable { mutableStateOf(granted) }
+    var usePhotoOnlyMode by rememberSaveable { mutableStateOf(false) }
 
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -41,23 +50,31 @@ fun CameraPermissionGate(content: @Composable () -> Unit) {
         launcher.launch(permission)
     }
 
+    val lifecycleOwner = context as? LifecycleOwner
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                granted = isCameraPermissionGranted(context)
+            }
+        }
+        lifecycleOwner?.lifecycle?.addObserver(observer)
+        onDispose { lifecycleOwner?.lifecycle?.removeObserver(observer) }
+    }
+
     val permissionState = CameraPermissionUiState(
         isGranted = granted,
         isSystemRequestInFlight = systemRequestInFlight,
-        hasRequestedPermission = hasRequestedPermission,
+        usePhotoOnlyMode = usePhotoOnlyMode,
     )
 
-    LaunchedEffect(permissionState.shouldLaunchInitialSystemRequest) {
-        if (permissionState.shouldLaunchInitialSystemRequest) {
-            launchSystemPermissionRequest()
-        }
-    }
-
     when (permissionState.stage) {
-        CameraPermissionStage.Granted -> content()
+        CameraPermissionStage.Granted -> content(true, ::launchSystemPermissionRequest)
+        CameraPermissionStage.PhotoOnly -> content(false, ::launchSystemPermissionRequest)
         CameraPermissionStage.RequestingSystemPermission -> PermissionRequestInProgress()
-        CameraPermissionStage.NeedsUserAction -> PermissionDeniedPrompt(
-            onRequest = { launchSystemPermissionRequest() },
+        CameraPermissionStage.ChooseAccess -> CameraAccessChoice(
+            wasDenied = hasRequestedPermission,
+            onRequest = ::launchSystemPermissionRequest,
+            onContinueWithPhotos = { usePhotoOnlyMode = true },
             onOpenSettings = { context.openOverlayCamSettings() },
         )
     }

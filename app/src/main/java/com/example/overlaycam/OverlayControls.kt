@@ -43,6 +43,7 @@ internal fun OverlayControlDock(
     modifier: Modifier = Modifier,
     state: OverlayUiState,
     busyLabel: String?,
+    supportingText: String? = null,
     opacity: Float,
     onOpacityChange: (Float) -> Unit,
     onRecommendedAction: () -> Unit,
@@ -73,7 +74,7 @@ internal fun OverlayControlDock(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(state.title, style = MaterialTheme.typography.titleMedium)
                     Text(
-                        text = busyLabel ?: state.recommendedActionHint,
+                        text = busyLabel ?: supportingText ?: state.recommendedActionHint,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -186,6 +187,7 @@ internal fun WorkflowActionPanel(
     enabled: Boolean,
     onRecommendedAction: () -> Unit,
     onFreezeCamera: () -> Unit,
+    onEnableCamera: () -> Unit,
     onPickBackground: () -> Unit,
     onPickOverlay: () -> Unit,
     onResetOverlay: () -> Unit,
@@ -215,15 +217,29 @@ internal fun WorkflowActionPanel(
 
     when (state.mode) {
         OverlayUiMode.Setup -> ActionFlow {
-            OutlinedButton(enabled = enabled, onClick = onPickBackground) {
-                Text("Use background photo")
+            if (state.cameraAvailable) {
+                OutlinedButton(enabled = enabled, onClick = onPickBackground) {
+                    Text("Use background photo")
+                }
+            } else {
+                OutlinedButton(enabled = enabled, onClick = onEnableCamera) {
+                    Text("Enable live camera")
+                }
             }
         }
 
         OverlayUiMode.BackgroundReady -> ActionFlow {
-            OutlinedButton(enabled = enabled, onClick = onFreezeCamera) { Text("Refreeze") }
+            if (state.cameraAvailable) {
+                OutlinedButton(enabled = enabled, onClick = onFreezeCamera) { Text("Refreeze") }
+            } else {
+                OutlinedButton(enabled = enabled, onClick = onEnableCamera) {
+                    Text("Enable live camera")
+                }
+            }
             OutlinedButton(enabled = enabled, onClick = onPickBackground) { Text("Change background") }
-            OutlinedButton(enabled = enabled, onClick = onReturnToLiveCamera) { Text("Live camera") }
+            if (state.cameraAvailable) {
+                OutlinedButton(enabled = enabled, onClick = onReturnToLiveCamera) { Text("Live camera") }
+            }
         }
 
         OverlayUiMode.EditOverlay -> ActionFlow {
@@ -349,15 +365,18 @@ private fun AdjustmentSlider(
 
 @Composable
 internal fun PointFixPanel(
-    pointCount: Int,
+    state: PointMatchUiState,
     onClearPoints: () -> Unit,
     onResetZoom: () -> Unit,
 ) {
     WorkflowCallout(
-        label = "Matching landmarks",
-        text = "Tap one or two recognizable points. One point fixes position; two also correct size and rotation.",
+        label = state.title,
+        text = state.instruction,
     )
-    Text("Points placed: $pointCount of 2", style = MaterialTheme.typography.bodySmall)
+    Text(
+        "Landmark pairs: ${state.completedPointCount} of 2",
+        style = MaterialTheme.typography.bodySmall,
+    )
     ActionFlow {
         OutlinedButton(onClick = onClearPoints) { Text("Clear points") }
         OutlinedButton(onClick = onResetZoom) { Text("Reset zoom") }

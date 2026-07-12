@@ -1,36 +1,26 @@
 package com.example.overlaycam
 
-/**
- * Small, testable state machine for the camera permission gate.
- *
- * The app must not show its own permission prompt while the Android runtime
- * permission sheet is opening. Keeping that transition explicit prevents the
- * startup UX from stacking multiple modal-looking prompts on top of each other.
- */
-enum class CameraPermissionStage {
-    Granted,
+/** A small, testable state machine for optional live-camera access. */
+internal enum class CameraPermissionStage {
+    ChooseAccess,
     RequestingSystemPermission,
-    NeedsUserAction,
+    Granted,
+    PhotoOnly,
 }
 
-data class CameraPermissionUiState(
+internal data class CameraPermissionUiState(
     val isGranted: Boolean,
     val isSystemRequestInFlight: Boolean,
-    val hasRequestedPermission: Boolean,
+    val usePhotoOnlyMode: Boolean,
 ) {
     val stage: CameraPermissionStage = when {
         isGranted -> CameraPermissionStage.Granted
         isSystemRequestInFlight -> CameraPermissionStage.RequestingSystemPermission
-        !hasRequestedPermission -> CameraPermissionStage.RequestingSystemPermission
-        else -> CameraPermissionStage.NeedsUserAction
+        usePhotoOnlyMode -> CameraPermissionStage.PhotoOnly
+        else -> CameraPermissionStage.ChooseAccess
     }
 
-    val shouldLaunchInitialSystemRequest: Boolean =
-        !isGranted && !isSystemRequestInFlight && !hasRequestedPermission
-
-    val showSystemRequestWaitingScreen: Boolean =
-        stage == CameraPermissionStage.RequestingSystemPermission
-
-    val showManualPermissionPrompt: Boolean =
-        stage == CameraPermissionStage.NeedsUserAction
+    val cameraAvailable: Boolean = stage == CameraPermissionStage.Granted
+    val editorAvailable: Boolean =
+        stage == CameraPermissionStage.Granted || stage == CameraPermissionStage.PhotoOnly
 }

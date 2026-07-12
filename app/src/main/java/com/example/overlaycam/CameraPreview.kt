@@ -9,7 +9,6 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 
@@ -23,7 +22,6 @@ fun CameraPreview(
 ) {
     if (!isActive) return  // when paused, we skip rendering the camera view
 
-    val context = LocalContext.current
     AndroidView(
         modifier = modifier,
         factory = { ctx ->

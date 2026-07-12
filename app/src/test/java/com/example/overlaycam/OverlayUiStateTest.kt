@@ -37,6 +37,21 @@ class OverlayUiStateTest {
     }
 
     @Test
+    fun photoOnlySetupStartsWithBackgroundSelection() {
+        val state = OverlayUiState(
+            hasStillBackground = false,
+            cameraAvailable = false,
+        )
+
+        assertEquals(OverlayUiMode.Setup, state.mode)
+        assertEquals("PHOTOS", state.stageLabel)
+        assertEquals("Photo mode", state.title)
+        assertEquals(OverlayRecommendedAction.PickBackground, state.recommendedAction)
+        assertEquals("Choose background photo", state.recommendedActionLabel)
+        assertTrue(state.guidance.contains("optional"))
+    }
+
+    @Test
     fun workflowCopyExplainsTheImmediateActionWithoutNumberedSteps() {
         val states = listOf(
             OverlayUiState(hasStillBackground = false),

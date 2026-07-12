@@ -7,57 +7,53 @@ import kotlin.test.assertTrue
 
 class CameraPermissionUiStateTest {
     @Test
-    fun grantedPermissionShowsContentStage() {
-        val state = CameraPermissionUiState(
-            isGranted = true,
-            isSystemRequestInFlight = false,
-            hasRequestedPermission = true,
-        )
-
-        assertEquals(CameraPermissionStage.Granted, state.stage)
-        assertFalse(state.shouldLaunchInitialSystemRequest)
-        assertFalse(state.showManualPermissionPrompt)
-    }
-
-    @Test
-    fun firstLaunchRequestsOnlyTheSystemPermissionSheet() {
+    fun firstLaunchOffersAnExplicitAccessChoice() {
         val state = CameraPermissionUiState(
             isGranted = false,
             isSystemRequestInFlight = false,
-            hasRequestedPermission = false,
+            usePhotoOnlyMode = false,
         )
 
-        assertEquals(CameraPermissionStage.RequestingSystemPermission, state.stage)
-        assertTrue(state.shouldLaunchInitialSystemRequest)
-        assertTrue(state.showSystemRequestWaitingScreen)
-        assertFalse(state.showManualPermissionPrompt)
+        assertEquals(CameraPermissionStage.ChooseAccess, state.stage)
+        assertFalse(state.editorAvailable)
+        assertFalse(state.cameraAvailable)
     }
 
     @Test
-    fun inFlightRequestKeepsManualPromptHidden() {
+    fun inFlightRequestShowsOnlyTheSystemWaitingStage() {
         val state = CameraPermissionUiState(
             isGranted = false,
             isSystemRequestInFlight = true,
-            hasRequestedPermission = true,
+            usePhotoOnlyMode = false,
         )
 
         assertEquals(CameraPermissionStage.RequestingSystemPermission, state.stage)
-        assertFalse(state.shouldLaunchInitialSystemRequest)
-        assertTrue(state.showSystemRequestWaitingScreen)
-        assertFalse(state.showManualPermissionPrompt)
+        assertFalse(state.editorAvailable)
     }
 
     @Test
-    fun deniedPermissionShowsOnlyManualRetryPrompt() {
+    fun photoOnlyModeOpensTheEditorWithoutCameraAccess() {
         val state = CameraPermissionUiState(
             isGranted = false,
             isSystemRequestInFlight = false,
-            hasRequestedPermission = true,
+            usePhotoOnlyMode = true,
         )
 
-        assertEquals(CameraPermissionStage.NeedsUserAction, state.stage)
-        assertFalse(state.shouldLaunchInitialSystemRequest)
-        assertFalse(state.showSystemRequestWaitingScreen)
-        assertTrue(state.showManualPermissionPrompt)
+        assertEquals(CameraPermissionStage.PhotoOnly, state.stage)
+        assertTrue(state.editorAvailable)
+        assertFalse(state.cameraAvailable)
+    }
+
+    @Test
+    fun grantedPermissionAlwaysWinsOverPhotoOnlyPreference() {
+        val state = CameraPermissionUiState(
+            isGranted = true,
+            isSystemRequestInFlight = false,
+            usePhotoOnlyMode = true,
+        )
+
+        assertEquals(CameraPermissionStage.Granted, state.stage)
+        assertTrue(state.editorAvailable)
+        assertTrue(state.cameraAvailable)
     }
 }
