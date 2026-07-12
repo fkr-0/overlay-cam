@@ -589,30 +589,44 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
 
             }
 
-            OverlayControlSheet(
+            AnimatedVisibility(
+                visible = !showTools,
                 modifier = Modifier.align(Alignment.BottomCenter),
-                expanded = controlsExpanded,
-                onExpandedChange = { controlsExpanded = it },
-                stageLabel = uiState.stageLabel,
-                title = if (uiState.mode == OverlayUiMode.FixedOverlay) {
-                    "${uiState.title} · ${variant.label}"
-                } else {
-                    uiState.title
-                },
-                guidance = uiState.guidance,
-                expandActionLabel = uiState.expandActionLabel,
-                collapsedContent = {
+            ) {
+                OverlayControlDock(
+                    state = uiState,
+                    busyLabel = busyLabel,
+                    opacity = opacity,
+                    onOpacityChange = { opacity = it },
+                    onRecommendedAction = { runRecommendedAction() },
+                    onOpenTools = { showTools = true },
+                )
+            }
+
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+
+            if (showTools) {
+                OverlayToolsSheet(
+                    state = uiState,
+                    onDismissRequest = { showTools = false },
+                ) {
                     WorkflowActionPanel(
                         state = uiState,
-                        expanded = false,
+                        enabled = busyLabel == null,
                         onRecommendedAction = { runRecommendedAction() },
                         onFreezeCamera = { freezeCameraBackground("Background refreshed") },
                         onPickBackground = {
-                            controlsExpanded = false
+                            showTools = false
                             launchImagePicker(PickerTarget.Background)
                         },
                         onPickOverlay = {
-                            controlsExpanded = false
+                            showTools = false
                             launchImagePicker(PickerTarget.Overlay)
                         },
                         onResetOverlay = {
@@ -622,130 +636,103 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                         onReturnToLiveCamera = { returnToLiveCamera() },
                         onAdjustAgain = { reopenLatestOverlayForEditing() },
                     )
-                    if (uiState.showQuickOpacityControl) {
-                        QuickOpacityControl(
+
+                    if (uiState.showEditPanel) {
+                        EditOverlayPanel(
+                            scale = scaleF,
+                            minScale = minScale,
+                            maxScale = maxScale,
+                            rotationDeg = rotationDeg,
                             opacity = opacity,
+                            canAutoAlign = hasStillBackground && overlayBitmap != null,
+                            autoAlignInProgress = autoAlignInProgress,
+                            autoAlignStatus = autoAlignStatus,
+                            onScaleChange = { scaleF = it },
+                            onRotationChange = { rotationDeg = it },
                             onOpacityChange = { opacity = it },
+                            onReset = {
+                                resetWorkingOverlayTransform(clearPoints = true)
+                                hideAllOverlays = false
+                            },
+                            onAutoAlign = {
+                                val bg = backgroundBitmap
+                                val ov = overlayBitmap
+                                if (bg != null && ov != null) {
+                                    autoAlignInProgress = true
+                                    autoAlignStatus = "Matching image patterns…"
+                                    coroutineScope.launch {
+                                        val result = withContext(Dispatchers.Default) {
+                                            estimateOverlayAutoAlignment(
+                                                background = bg,
+                                                overlay = ov,
+                                                previewSize = previewSize,
+                                                scale = scaleF,
+                                                rotation = rotationDeg,
+                                                offsetX = offsetX,
+                                                offsetY = offsetY,
+                                                fixedPoints = pointLocks.toList(),
+                                            )
+                                        }
+                                        if (result != null && result.score >= 0.18f) {
+                                            offsetX += result.dx
+                                            offsetY += result.dy
+                                            autoAlignStatus = "Auto-aligned by ${String.format("%.0f", result.dx)} × ${String.format("%.0f", result.dy)} px · confidence ${String.format("%.2f", result.score)}"
+                                        } else if (result != null) {
+                                            autoAlignStatus = "No confident match · best confidence ${String.format("%.2f", result.score)}"
+                                        } else {
+                                            autoAlignStatus = "No usable textured overlay area found"
+                                        }
+                                        autoAlignInProgress = false
+                                    }
+                                }
+                            },
+                            onStartPointFix = {
+                                pointFixMode = true
+                                pointFixZoom = 1f
+                                selectedPointLockIndex = if (pointLocks.isEmpty()) -1 else 0
+                                showTools = false
+                            },
                         )
                     }
-                },
-            ) {
-                WorkflowActionPanel(
-                    state = uiState,
-                    expanded = true,
-                    onRecommendedAction = { runRecommendedAction() },
-                    onFreezeCamera = { freezeCameraBackground("Background refreshed") },
-                    onPickBackground = {
-                        controlsExpanded = false
-                        launchImagePicker(PickerTarget.Background)
-                    },
-                    onPickOverlay = {
-                        controlsExpanded = false
-                        launchImagePicker(PickerTarget.Overlay)
-                    },
-                    onResetOverlay = {
-                        resetWorkingOverlayTransform(clearPoints = true)
-                        hideAllOverlays = false
-                    },
-                    onReturnToLiveCamera = { returnToLiveCamera() },
-                    onAdjustAgain = { reopenLatestOverlayForEditing() },
-                )
 
-                if (uiState.showEditPanel) {
-                    EditOverlayPanel(
-                        scale = scaleF,
-                        minScale = minScale,
-                        maxScale = maxScale,
-                        rotationDeg = rotationDeg,
-                        opacity = opacity,
-                        canAutoAlign = hasStillBackground && overlayBitmap != null,
-                        autoAlignInProgress = autoAlignInProgress,
-                        autoAlignStatus = autoAlignStatus,
-                        onScaleChange = { scaleF = it },
-                        onRotationChange = { rotationDeg = it },
-                        onOpacityChange = { opacity = it },
-                        onReset = {
-                            resetWorkingOverlayTransform(clearPoints = true)
-                            hideAllOverlays = false
-                        },
-                        onAutoAlign = {
-                            val bg = backgroundBitmap
-                            val ov = overlayBitmap
-                            if (bg != null && ov != null) {
-                                autoAlignInProgress = true
-                                autoAlignStatus = "Matching image patterns…"
-                                coroutineScope.launch {
-                                    val result = withContext(Dispatchers.Default) {
-                                        estimateOverlayAutoAlignment(
-                                            background = bg,
-                                            overlay = ov,
-                                            previewSize = previewSize,
-                                            scale = scaleF,
-                                            rotation = rotationDeg,
-                                            offsetX = offsetX,
-                                            offsetY = offsetY,
-                                            fixedPoints = pointLocks.toList(),
-                                        )
-                                    }
-                                    if (result != null && result.score >= 0.18f) {
-                                        offsetX += result.dx
-                                        offsetY += result.dy
-                                        autoAlignStatus = "Auto-aligned Δx ${String.format("%.0f", result.dx)}, Δy ${String.format("%.0f", result.dy)} · score ${String.format("%.2f", result.score)}"
-                                    } else if (result != null) {
-                                        autoAlignStatus = "No confident match · best score ${String.format("%.2f", result.score)}"
-                                    } else {
-                                        autoAlignStatus = "No usable textured overlay area found"
-                                    }
-                                    autoAlignInProgress = false
-                                }
-                            }
-                        },
-                        onStartPointFix = {
-                            pointFixMode = true
-                            pointFixZoom = 1f
-                            selectedPointLockIndex = if (pointLocks.isEmpty()) -1 else 0
-                            controlsExpanded = false
-                        },
-                    )
-                }
+                    if (uiState.showPointFixPanel) {
+                        PointFixPanel(
+                            pointCount = pointLocks.size,
+                            onClearPoints = {
+                                pointLocks.clear()
+                                selectedPointLockIndex = -1
+                            },
+                            onResetZoom = { pointFixZoom = 1f },
+                        )
+                    }
 
-                if (uiState.showPointFixPanel) {
-                    PointFixPanel(
-                        pointCount = pointLocks.size,
-                        onClearPoints = {
-                            pointLocks.clear()
-                            selectedPointLockIndex = -1
-                        },
-                        onResetZoom = { pointFixZoom = 1f },
-                    )
-                }
-
-                if (uiState.showFixedOverlayActions) {
-                    FixedOverlayActionsPanel(
-                        hideAllOverlays = hideAllOverlays,
-                        flipOverlayAndBackground = flipOverlayAndBackground,
-                        frozenOverlayOpacity = frozenOverlayOpacity,
-                        variant = variant,
-                        heatmapSimilarityThreshold = heatmapSimilarityThreshold,
-                        heatmapPalette = heatmapPalette,
-                        drawingInstruction = heatmapInstruction.takeIf { variant == EffectVariant.Heatmap },
-                        onToggleHide = { hideAllOverlays = !hideAllOverlays },
-                        onAddOverlay = {
-                            addOverlayPending = true
-                            overlayFixedMode = false
-                            hideLayerAUntilSecondLock = true
-                            resetWorkingOverlayTransform(clearPoints = true)
-                            overlayBitmap = null
-                            overlayUri = null
-                            controlsExpanded = false
-                            launchImagePicker(PickerTarget.Overlay)
-                        },
-                        onToggleFlip = { flipOverlayAndBackground = !flipOverlayAndBackground },
-                        onNextEffect = { variantIndex = (variantIndex + 1) % variants.size },
-                        onFrozenOverlayOpacityChange = { frozenOverlayOpacity = it },
-                        onHeatmapSimilarityThresholdChange = { heatmapSimilarityThreshold = it },
-                        onHeatmapPaletteChange = { heatmapPalette = it },
-                    )
+                    if (uiState.showFixedOverlayActions) {
+                        FixedOverlayActionsPanel(
+                            hideAllOverlays = hideAllOverlays,
+                            flipOverlayAndBackground = flipOverlayAndBackground,
+                            frozenOverlayOpacity = frozenOverlayOpacity,
+                            variant = variant,
+                            heatmapSimilarityThreshold = heatmapSimilarityThreshold,
+                            heatmapPalette = heatmapPalette,
+                            drawingInstruction = heatmapInstruction.takeIf { variant == EffectVariant.Heatmap },
+                            onToggleHide = { hideAllOverlays = !hideAllOverlays },
+                            onAddOverlay = {
+                                addOverlayPending = true
+                                overlayFixedMode = false
+                                hideLayerAUntilSecondLock = true
+                                resetWorkingOverlayTransform(clearPoints = true)
+                                overlayBitmap = null
+                                overlayUri = null
+                                showTools = false
+                                launchImagePicker(PickerTarget.Overlay)
+                            },
+                            onToggleFlip = { flipOverlayAndBackground = !flipOverlayAndBackground },
+                            onEffectChange = { selected -> variantIndex = variants.indexOf(selected) },
+                            onFrozenOverlayOpacityChange = { frozenOverlayOpacity = it },
+                            onHeatmapSimilarityThresholdChange = { heatmapSimilarityThreshold = it },
+                            onHeatmapPaletteChange = { heatmapPalette = it },
+                        )
+                    }
                 }
             }
 
@@ -774,100 +761,75 @@ private fun DrawScope.drawOverlayLayer(layer: OverlayLayer, previewForDraw: IntS
     }
 }
 
-@Composable
-private fun CornerHandle(x: Float, y: Float, halfPx: Float, onDrag: (dx: Float, dy: Float) -> Unit) {
-    Box(
-        Modifier
-            .offset { IntOffset((x - halfPx).toInt(), (y - halfPx).toInt()) }
-            .size(20.dp)
-            .drawBehind { drawRect(Color.Yellow) }
-            .pointerInput(Unit) {
-                detectDragGestures { change: PointerInputChange, drag ->
-                    change.consume()
-                    onDrag(drag.x, drag.y)
-                }
-            }
-    )
-}
+private data class SaveCompositeResult(val message: String)
 
-private fun saveCompositeLayers(
+private suspend fun saveCompositeLayers(
     context: android.content.Context,
-    imageCapture: ImageCapture?,
     previewSize: IntSize,
     layers: List<OverlayLayer>,
-    cropRect: android.graphics.RectF?,
-    frozen: Bitmap?,
+    frozen: Bitmap,
     variant: EffectVariant,
     flipOverlayAndBackground: Boolean,
     frozenOverlayOpacity: Float,
     heatmapSimilarityThreshold: Float,
-    heatmapPalette: HeatmapPalette
-) {
-    if (layers.isEmpty()) {
-        Toast.makeText(context, "No visible overlay to save", Toast.LENGTH_SHORT).show()
-        return
-    }
+    heatmapPalette: HeatmapPalette,
+): SaveCompositeResult {
+    return try {
+        val outBitmap = withContext(Dispatchers.Default) {
+            composeLayers(
+                camBitmap = frozen,
+                previewSize = previewSize,
+                layers = layers,
+                variant = variant,
+                flipOverlayAndBackground = flipOverlayAndBackground,
+                frozenOverlayOpacity = frozenOverlayOpacity,
+                heatmapSimilarityThreshold = heatmapSimilarityThreshold,
+                heatmapPalette = heatmapPalette,
+            )
+        }
 
-    if (frozen != null) {
-        composeAndSaveLayers(
-            context = context,
-            camBitmap = frozen,
-            previewSize = previewSize,
-            layers = layers,
-            cropRect = cropRect,
-            variant = variant,
-            flipOverlayAndBackground = flipOverlayAndBackground,
-            frozenOverlayOpacity = frozenOverlayOpacity,
-            heatmapSimilarityThreshold = heatmapSimilarityThreshold,
-            heatmapPalette = heatmapPalette
-        )
-        return
-    }
-
-    if (imageCapture == null) {
-        Toast.makeText(context, "Freeze or load a background first", Toast.LENGTH_SHORT).show()
-        return
-    }
-
-    val name = "OverlayCam_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(System.currentTimeMillis())}.jpg"
-    val temp = File(context.cacheDir, "$name.tmp.jpg")
-    val options = ImageCapture.OutputFileOptions.Builder(temp).build()
-    val executor = ContextCompat.getMainExecutor(context)
-
-    imageCapture.takePicture(options, executor,
-        object : ImageCapture.OnImageSavedCallback {
-            override fun onError(exception: ImageCaptureException) {
-                Toast.makeText(context, "Capture failed: ${exception.message}", Toast.LENGTH_LONG).show()
-            }
-
-            override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
-                try {
-                    val camBitmap = BitmapFactory.decodeFile(temp.absolutePath) ?: run {
-                        temp.delete()
-                        Toast.makeText(context, "Failed to decode captured image", Toast.LENGTH_LONG).show()
-                        return
-                    }
-                    composeAndSaveLayers(
-                        context = context,
-                        camBitmap = camBitmap,
-                        previewSize = previewSize,
-                        layers = layers,
-                        cropRect = cropRect,
-                        variant = variant,
-                        flipOverlayAndBackground = flipOverlayAndBackground,
-                        frozenOverlayOpacity = frozenOverlayOpacity,
-                        heatmapSimilarityThreshold = heatmapSimilarityThreshold,
-                        heatmapPalette = heatmapPalette
-                    )
-                    temp.delete()
-                } catch (t: Throwable) {
-                    Toast.makeText(context, "Save failed: ${t.message}", Toast.LENGTH_LONG).show()
+        withContext(Dispatchers.IO) {
+            val resolver = context.contentResolver
+            val name = "OverlayCam_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(System.currentTimeMillis())}.jpg"
+            val values = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, name)
+                put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                if (Build.VERSION.SDK_INT >= 29) {
+                    put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/OverlayCam")
+                    put(MediaStore.Images.Media.IS_PENDING, 1)
                 }
             }
-        }
-    )
-}
 
+            val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                ?: return@withContext SaveCompositeResult("Could not create a gallery image")
+            try {
+                val written = resolver.openOutputStream(uri)?.use { stream ->
+                    outBitmap.compress(Bitmap.CompressFormat.JPEG, 92, stream)
+                } == true
+                if (!written) {
+                    resolver.delete(uri, null, null)
+                    return@withContext SaveCompositeResult("Could not write the image")
+                }
+                if (Build.VERSION.SDK_INT >= 29) {
+                    resolver.update(
+                        uri,
+                        ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) },
+                        null,
+                        null,
+                    )
+                }
+                SaveCompositeResult("Saved to Pictures/OverlayCam")
+            } catch (error: Throwable) {
+                resolver.delete(uri, null, null)
+                SaveCompositeResult("Save failed: ${error.message ?: "unknown error"}")
+            } finally {
+                outBitmap.recycle()
+            }
+        }
+    } catch (error: Throwable) {
+        SaveCompositeResult("Save failed: ${error.message ?: "unknown error"}")
+    }
+}
 
 private fun estimateOverlayAutoAlignment(
     background: Bitmap,
@@ -983,18 +945,16 @@ private fun lumaOf(pixel: Int): Float {
     return 0.299f * r + 0.587f * g + 0.114f * b
 }
 
-private fun composeAndSaveLayers(
-    context: android.content.Context,
+private fun composeLayers(
     camBitmap: Bitmap,
     previewSize: IntSize,
     layers: List<OverlayLayer>,
-    cropRect: android.graphics.RectF?,
     variant: EffectVariant,
     flipOverlayAndBackground: Boolean,
     frozenOverlayOpacity: Float,
     heatmapSimilarityThreshold: Float,
     heatmapPalette: HeatmapPalette
-) {
+): Bitmap {
     val sx = camBitmap.width.toFloat() / previewSize.width
     val sy = camBitmap.height.toFloat() / previewSize.height
 
@@ -1043,30 +1003,7 @@ private fun composeAndSaveLayers(
         isFilterBitmap = true
     }
 
-    if (variant != EffectVariant.Heatmap && cropRect != null) {
-        val camCrop = android.graphics.RectF(
-            cropRect.left * sx, cropRect.top * sy,
-            cropRect.right * sx, cropRect.bottom * sy
-        )
-        canvas.save()
-        canvas.clipRect(camCrop)
-        layers.forEach { layer ->
-            val m = buildOverlayMatrix(
-                previewSize = previewSize,
-                overlay = layer.bitmap,
-                scale = layer.scale,
-                rotation = layer.rotation,
-                offsetX = layer.offsetX,
-                offsetY = layer.offsetY,
-                fixedPoints = layer.fixedPoints,
-                sx = sx,
-                sy = sy
-            )
-            invertOverlayPaint.alpha = (layer.opacity * 255).toInt().coerceIn(0, 255)
-            canvas.drawBitmap(layer.bitmap, m, invertOverlayPaint)
-        }
-        canvas.restore()
-    } else if (variant != EffectVariant.Heatmap) {
+    if (variant != EffectVariant.Heatmap) {
         layers.forEach { layer ->
             val m = buildOverlayMatrix(
                 previewSize = previewSize,
@@ -1093,22 +1030,7 @@ private fun composeAndSaveLayers(
         canvas.drawBitmap(camBitmap, 0f, 0f, p)
     }
 
-    val name = "OverlayCam_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(System.currentTimeMillis())}.jpg"
-    val values = ContentValues().apply {
-        put(MediaStore.Images.Media.DISPLAY_NAME, name)
-        put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-        if (Build.VERSION.SDK_INT >= 29) {
-            put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/OverlayCam")
-        }
-    }
-
-    val uri = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
-    uri?.let { out ->
-        context.contentResolver.openOutputStream(out)?.use { os ->
-            outBitmap.compress(Bitmap.CompressFormat.JPEG, 92, os)
-        }
-        Toast.makeText(context, "Saved to Pictures/OverlayCam", Toast.LENGTH_SHORT).show()
-    } ?: Toast.makeText(context, "Failed to create media entry", Toast.LENGTH_LONG).show()
+    return outBitmap
 }
 
 private fun buildOverlayMatrix(

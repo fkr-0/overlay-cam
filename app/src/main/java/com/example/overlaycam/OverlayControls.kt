@@ -97,7 +97,7 @@ internal fun OverlayControlDock(
                         strokeWidth = 2.dp,
                     )
                     Spacer(Modifier.size(8.dp))
-                    Text(busyLabel)
+                    Text(busyLabel.orEmpty())
                 } else {
                     Text(state.recommendedActionLabel)
                 }
