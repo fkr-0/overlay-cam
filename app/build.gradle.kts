@@ -15,7 +15,6 @@ android {
         versionName = "0.1"
     }
 
-    // ✅ Make Java toolchain/bytecode 17
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -28,7 +27,6 @@ android {
     }
 
     kotlinOptions {
-        // ✅ Kotlin bytecode target 17
         jvmTarget = "17"
     }
 
@@ -37,7 +35,6 @@ android {
     }
 }
 
-// ✅ Kotlin JVM toolchain (ensures Gradle uses JDK 17)
 kotlin {
     jvmToolchain(17)
 }
@@ -65,4 +62,5 @@ dependencies {
     implementation("androidx.camera:camera-view:$cameraxVersion")
 
     implementation("io.coil-kt:coil-compose:2.7.0")
+    testImplementation(kotlin("test"))
 }

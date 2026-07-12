@@ -2,7 +2,7 @@ PROJECT ?= overlay-cam
 IMAGE   ?= overlay-cam:android
 WORKDIR ?= /work
 
-.PHONY: docker build clean install shell
+.PHONY: docker docker-nocache build clean test install shell up ci
 
 docker:
 	docker build -t $(IMAGE) .
@@ -19,7 +19,7 @@ build:
 	  -v $$HOME/.gradle:/.gradle \
 	  -w $(WORKDIR) \
 	  $(IMAGE) \
-	  bash -lc "./scripts/gradle-in-docker.sh assembleDebug"
+	  bash -lc "bash ./scripts/gradle-in-docker.sh assembleDebug"
 
 clean:
 	docker run --rm \
@@ -27,7 +27,15 @@ clean:
 	  -v $$HOME/.gradle:/.gradle \
 	  -w $(WORKDIR) \
 	  $(IMAGE) \
-	  bash -lc "./scripts/gradle-in-docker.sh clean"
+	  bash -lc "bash ./scripts/gradle-in-docker.sh clean"
+
+test:
+	docker run --rm \
+	  -v $$PWD:$(WORKDIR) \
+	  -v $$HOME/.gradle:/.gradle \
+	  -w $(WORKDIR) \
+	  $(IMAGE) \
+	  bash -lc "bash ./scripts/gradle-in-docker.sh testDebugUnitTest"
 
 shell:
 	docker run --rm -it \
@@ -45,4 +53,4 @@ up:
 	docker compose up --build --abort-on-container-exit
 
 # Simulate CI locally
-ci: docker build
+ci: docker build test

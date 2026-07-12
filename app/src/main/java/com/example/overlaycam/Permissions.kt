@@ -1,59 +1,75 @@
 package com.example.overlaycam
 
 import android.Manifest
-import android.os.Build
-import androidx.compose.runtime.*
-import androidx.compose.material3.*
-import androidx.compose.ui.window.Dialog
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.foundation.layout.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
+import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 
 @Composable
 fun CameraPermissionGate(content: @Composable () -> Unit) {
+    val context = LocalContext.current
     val permission = Manifest.permission.CAMERA
-    var granted by rememberSaveable { mutableStateOf(false) }
-    var shouldExplain by rememberSaveable { mutableStateOf(false) }
+
+    var granted by rememberSaveable { mutableStateOf(isCameraPermissionGranted(context)) }
+    var systemRequestInFlight by rememberSaveable { mutableStateOf(false) }
+    var hasRequestedPermission by rememberSaveable { mutableStateOf(granted) }
 
     val launcher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
+        ActivityResultContracts.RequestPermission(),
     ) { isGranted ->
-        granted = isGranted
-        if (!isGranted) shouldExplain = true
+        granted = isGranted || isCameraPermissionGranted(context)
+        systemRequestInFlight = false
+        hasRequestedPermission = true
     }
 
-    LaunchedEffect(Unit) {
-        // Kick off request on first launch
+    fun launchSystemPermissionRequest() {
+        if (granted || systemRequestInFlight) return
+        systemRequestInFlight = true
+        hasRequestedPermission = true
         launcher.launch(permission)
     }
 
-    if (granted) {
-        content()
-    } else {
-        PermissionDialog(
-            onRequest = { launcher.launch(permission) }
+    val permissionState = CameraPermissionUiState(
+        isGranted = granted,
+        isSystemRequestInFlight = systemRequestInFlight,
+        hasRequestedPermission = hasRequestedPermission,
+    )
+
+    LaunchedEffect(permissionState.shouldLaunchInitialSystemRequest) {
+        if (permissionState.shouldLaunchInitialSystemRequest) {
+            launchSystemPermissionRequest()
+        }
+    }
+
+    when (permissionState.stage) {
+        CameraPermissionStage.Granted -> content()
+        CameraPermissionStage.RequestingSystemPermission -> PermissionRequestInProgress()
+        CameraPermissionStage.NeedsUserAction -> PermissionDeniedPrompt(
+            onRequest = { launchSystemPermissionRequest() },
+            onOpenSettings = { context.openOverlayCamSettings() },
         )
     }
 }
 
-@Composable
-private fun PermissionDialog(onRequest: () -> Unit) {
-    Surface {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(24.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text("Camera permission is required.", textAlign = TextAlign.Center)
-            Spacer(Modifier.height(16.dp))
-            Button(onClick = onRequest) { Text("Grant") }
-        }
+private fun isCameraPermissionGranted(context: Context): Boolean =
+    ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+
+private fun Context.openOverlayCamSettings() {
+    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+        data = Uri.fromParts("package", packageName, null)
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
+    startActivity(intent)
 }

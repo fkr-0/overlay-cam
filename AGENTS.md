@@ -78,6 +78,10 @@ overlay-cam/
 
 ## Build & Development Workflow
 
+### Agent Build Rule
+- Always build in Docker, not directly on host Gradle.
+- Use `make build` for APK builds.
+
 ### Quick Start
 ```bash
 # Build Docker image with Android SDK
@@ -161,7 +165,7 @@ docker compose up --build --abort-on-container-exit
 
 ### Testing Camera Changes
 - Use `make shell` for interactive Docker container
-- Build with `./gradlew assembleDebug`
+- Build with `make build`
 - Install via `adb` on host
 
 ---
