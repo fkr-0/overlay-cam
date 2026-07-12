@@ -499,9 +499,22 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                     }
                 }
 
-                var swipeDelta by remember { mutableFloatStateOf(0f) }
                 val canvasModifier = Modifier
                     .fillMaxSize()
+                    .semantics {
+                        contentDescription = when (uiState.mode) {
+                            OverlayUiMode.EditOverlay -> "Overlay editor canvas"
+                            OverlayUiMode.PointFix -> "Point matching canvas"
+                            OverlayUiMode.FixedOverlay -> "Finished overlay preview"
+                            else -> "Camera and background preview"
+                        }
+                        stateDescription = when (uiState.mode) {
+                            OverlayUiMode.EditOverlay -> "Drag, pinch, or rotate the overlay"
+                            OverlayUiMode.PointFix -> "${pointLocks.size} of 2 matching points placed"
+                            OverlayUiMode.FixedOverlay -> variant.label
+                            else -> uiState.title
+                        }
+                    }
                     .then(if (!overlayFixedMode) Modifier.transformable(transformState) else Modifier)
                     .pointerInput(pointFixMode, overlayBitmap, hasStillBackground, selectedPointLockIndex) {
                         detectTapGestures { tap ->
@@ -529,40 +542,9 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                             }
                         }
                     }
-                    .pointerInput(overlayFixedMode) {
-                        detectVerticalDragGestures(
-                            onVerticalDrag = { _, dragAmount ->
-                                if (!overlayFixedMode) return@detectVerticalDragGestures
-                                swipeDelta += dragAmount
-                                if (kotlin.math.abs(swipeDelta) > 120f) {
-                                    variantIndex = if (swipeDelta > 0f) {
-                                        (variantIndex + variants.size - 1) % variants.size
-                                    } else {
-                                        (variantIndex + 1) % variants.size
-                                    }
-                                    swipeDelta = 0f
-                                }
-                            },
-                            onDragEnd = { swipeDelta = 0f }
-                        )
-                    }
-                    .pointerInput(pointFixMode, overlayFixedMode) {
-                        detectDragGestures { change: PointerInputChange, drag ->
-                            change.consume()
-                            if (!pointFixMode && !overlayFixedMode) {
-                                offsetX += drag.x
-                                offsetY += drag.y
-                            }
-                        }
-                    }
 
                 Canvas(modifier = canvasModifier) {
-                if (cropMode) drawRect(Color(0f, 0f, 0f, 0.35f))
-
-                val clip = if (cropMode)
-                    Rect(cropRect.left, cropRect.top, cropRect.right, cropRect.bottom)
-                else
-                    Rect(0f, 0f, size.width, size.height)
+                val clip = Rect(0f, 0f, size.width, size.height)
 
                 clipRect(clip.left, clip.top, clip.right, clip.bottom) {
                     if (variant == EffectVariant.Heatmap) {
@@ -605,36 +587,6 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                 }
                 }
 
-                if (cropMode) {
-                    val density = LocalDensity.current
-                    Box(
-                        Modifier
-                            .offset { IntOffset(cropRect.left.toInt(), cropRect.top.toInt()) }
-                            .then(with(density) {
-                                Modifier.size(cropRect.width().toDp(), cropRect.height().toDp())
-                            })
-                            .border(2.dp, Color.Yellow)
-                            .pointerInput(cropRect) {
-                                detectDragGestures { change: PointerInputChange, drag ->
-                                    change.consume()
-                                    cropRect.offset(drag.x, drag.y)
-                                }
-                            }
-                    )
-                    val handleHalfPx = with(density) { 10.dp.toPx() }
-                    CornerHandle(cropRect.left, cropRect.top, handleHalfPx) { dx, dy ->
-                        cropRect = android.graphics.RectF(cropRect.left + dx, cropRect.top + dy, cropRect.right, cropRect.bottom)
-                    }
-                    CornerHandle(cropRect.right, cropRect.top, handleHalfPx) { dx, dy ->
-                        cropRect = android.graphics.RectF(cropRect.left, cropRect.top + dy, cropRect.right + dx, cropRect.bottom)
-                    }
-                    CornerHandle(cropRect.left, cropRect.bottom, handleHalfPx) { dx, dy ->
-                        cropRect = android.graphics.RectF(cropRect.left + dx, cropRect.top, cropRect.right, cropRect.bottom + dy)
-                    }
-                    CornerHandle(cropRect.right, cropRect.bottom, handleHalfPx) { dx, dy ->
-                        cropRect = android.graphics.RectF(cropRect.left, cropRect.top, cropRect.right + dx, cropRect.bottom + dy)
-                    }
-                }
             }
 
             OverlayControlSheet(
