@@ -256,6 +256,7 @@ internal fun QuickOpacityControl(
 
 @Composable
 internal fun EditOverlayPanel(
+    enabled: Boolean,
     scale: Float,
     minScale: Float,
     maxScale: Float,
@@ -278,6 +279,7 @@ internal fun EditOverlayPanel(
         valueLabel = String.format("%.0f%%", opacity * 100f),
         value = opacity,
         valueRange = 0f..1f,
+        enabled = enabled,
         onValueChange = { onOpacityChange(it.coerceIn(0f, 1f)) },
     )
     AdjustmentSlider(
@@ -285,6 +287,7 @@ internal fun EditOverlayPanel(
         valueLabel = String.format("%.2f×", scale),
         value = scale,
         valueRange = minScale..maxScale,
+        enabled = enabled,
         onValueChange = { onScaleChange(it.coerceIn(minScale, maxScale)) },
     )
     AdjustmentSlider(
@@ -292,16 +295,17 @@ internal fun EditOverlayPanel(
         valueLabel = String.format("%.0f°", rotationDeg),
         value = rotationDeg.coerceIn(-180f, 180f),
         valueRange = -180f..180f,
+        enabled = enabled,
         onValueChange = { onRotationChange(it.coerceIn(-180f, 180f)) },
     )
 
     ActionFlow {
-        OutlinedButton(onClick = onReset) { Text("Reset") }
+        OutlinedButton(enabled = enabled, onClick = onReset) { Text("Reset") }
         OutlinedButton(
-            enabled = canAutoAlign && !autoAlignInProgress,
+            enabled = enabled && canAutoAlign && !autoAlignInProgress,
             onClick = onAutoAlign,
         ) { Text(if (autoAlignInProgress) "Matching…" else "Auto align") }
-        OutlinedButton(onClick = onStartPointFix) { Text("Match points") }
+        OutlinedButton(enabled = enabled, onClick = onStartPointFix) { Text("Match points") }
     }
 
     autoAlignStatus?.let {
@@ -319,6 +323,7 @@ private fun AdjustmentSlider(
     valueLabel: String,
     value: Float,
     valueRange: ClosedFloatingPointRange<Float>,
+    enabled: Boolean = true,
     onValueChange: (Float) -> Unit,
 ) {
     Row(
@@ -335,6 +340,7 @@ private fun AdjustmentSlider(
     }
     Slider(
         modifier = Modifier.semantics { contentDescription = label },
+        enabled = enabled,
         value = value,
         onValueChange = onValueChange,
         valueRange = valueRange,
@@ -360,6 +366,7 @@ internal fun PointFixPanel(
 
 @Composable
 internal fun FixedOverlayActionsPanel(
+    canAddOverlay: Boolean,
     hideAllOverlays: Boolean,
     flipOverlayAndBackground: Boolean,
     frozenOverlayOpacity: Float,
@@ -390,7 +397,9 @@ internal fun FixedOverlayActionsPanel(
         OutlinedButton(onClick = onToggleHide) {
             Text(if (hideAllOverlays) "Show overlay" else "Hide overlay")
         }
-        OutlinedButton(onClick = onAddOverlay) { Text("Add another overlay") }
+        OutlinedButton(enabled = canAddOverlay, onClick = onAddOverlay) {
+            Text(if (canAddOverlay) "Add another overlay" else "Two overlays added")
+        }
         OutlinedButton(onClick = onToggleFlip) {
             Text(if (flipOverlayAndBackground) "Background below" else "Background on top")
         }

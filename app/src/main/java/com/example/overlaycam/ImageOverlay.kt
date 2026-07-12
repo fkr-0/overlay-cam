@@ -6,6 +6,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
+import android.graphics.ImageDecoder
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.net.Uri
@@ -33,6 +34,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -109,7 +111,6 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
         var lockedLayerA by remember { mutableStateOf<OverlayLayer?>(null) }
         var lockedLayerB by remember { mutableStateOf<OverlayLayer?>(null) }
         var hideAllOverlays by remember { mutableStateOf(false) }
-        var hideLayerAUntilSecondLock by remember { mutableStateOf(false) }
         var addOverlayPending by remember { mutableStateOf(false) }
         var flipOverlayAndBackground by remember { mutableStateOf(false) }
         var frozenOverlayOpacity by remember { mutableFloatStateOf(0.5f) }
@@ -128,6 +129,39 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
         var autoAlignStatus by remember { mutableStateOf<String?>(null) }
 
         var pickerTarget by remember { mutableStateOf(PickerTarget.Overlay) }
+
+        fun clearOverlayBitmaps() {
+            listOfNotNull(
+                overlayBitmap,
+                lockedLayerA?.bitmap,
+                lockedLayerB?.bitmap,
+            ).distinct().forEach { bitmap ->
+                if (!bitmap.isRecycled) bitmap.recycle()
+            }
+            overlayBitmap = null
+            overlayUri = null
+            lockedLayerA = null
+            lockedLayerB = null
+            heatmapBitmap?.takeUnless(Bitmap::isRecycled)?.recycle()
+            heatmapBitmap = null
+            heatmapImage = null
+            heatmapInstruction = null
+        }
+
+        DisposableEffect(Unit) {
+            onDispose {
+                backgroundBitmap?.takeUnless(Bitmap::isRecycled)?.recycle()
+                listOfNotNull(
+                    overlayBitmap,
+                    lockedLayerA?.bitmap,
+                    lockedLayerB?.bitmap,
+                    heatmapBitmap,
+                ).distinct().forEach { bitmap ->
+                    if (!bitmap.isRecycled) bitmap.recycle()
+                }
+            }
+        }
+
         fun resetWorkingOverlayTransform(clearPoints: Boolean = true) {
             scaleF = 1f
             rotationDeg = 0f
@@ -179,10 +213,8 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
             )
         }
 
-        suspend fun loadBitmap(uri: Uri?): Bitmap? = withContext(Dispatchers.IO) {
-            uri?.let { u ->
-                context.contentResolver.openInputStream(u)?.use { BitmapFactory.decodeStream(it) }
-            }
+        suspend fun loadBitmap(uri: Uri?): Bitmap? = uri?.let {
+            decodeBitmapForEditor(context, it)
         }
 
         val photoPickerLauncher =
@@ -230,12 +262,10 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                 backgroundBitmap?.recycle()
                 backgroundBitmap = bmp
                 backgroundImage = bmp.asImageBitmap()
+                clearOverlayBitmaps()
                 overlayFixedMode = false
                 hideAllOverlays = false
-                lockedLayerA = null
-                lockedLayerB = null
                 addOverlayPending = false
-                hideLayerAUntilSecondLock = false
                 resetWorkingOverlayTransform(clearPoints = true)
             } finally {
                 backgroundLoadInProgress = false
@@ -251,6 +281,7 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                     snackbarHostState.showSnackbar("Could not load that overlay image")
                     return@LaunchedEffect
                 }
+                overlayBitmap?.takeUnless(Bitmap::isRecycled)?.recycle()
                 overlayBitmap = bmp
             } finally {
                 overlayLoadInProgress = false
@@ -260,7 +291,7 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
         val hasStillBackground = backgroundBitmap != null
 
         val visibleLayersForEffects = listOfNotNull(
-            if (hideAllOverlays || hideLayerAUntilSecondLock) null else lockedLayerA,
+            if (hideAllOverlays) null else lockedLayerA,
             if (hideAllOverlays) null else lockedLayerB,
             currentWorkingLayerOrNull()?.takeIf { !overlayFixedMode || addOverlayPending }
         )
@@ -369,11 +400,9 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
             backgroundImage = null
             backgroundUri = null
             overlayFixedMode = false
-            lockedLayerA = null
-            lockedLayerB = null
+            clearOverlayBitmaps()
             hideAllOverlays = false
             addOverlayPending = false
-            hideLayerAUntilSecondLock = false
             resetWorkingOverlayTransform(clearPoints = true)
             showTools = false
         }
@@ -384,7 +413,6 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
             overlayBitmap = null
             overlayUri = null
             addOverlayPending = false
-            hideLayerAUntilSecondLock = false
             overlayFixedMode = true
             pointFixMode = false
             showTools = false
@@ -405,14 +433,13 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
             overlayFixedMode = false
             pointFixMode = false
             addOverlayPending = false
-            hideLayerAUntilSecondLock = false
             showTools = true
         }
 
         fun saveCurrentComposite() {
             if (saveInProgress) return
             val layers = listOfNotNull(
-                if (hideAllOverlays || hideLayerAUntilSecondLock) null else lockedLayerA,
+                if (hideAllOverlays) null else lockedLayerA,
                 if (hideAllOverlays) null else lockedLayerB,
                 currentWorkingLayerOrNull()?.takeIf { addOverlayPending }
             )
@@ -517,10 +544,10 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                             else -> uiState.title
                         }
                     }
-                    .then(if (!overlayFixedMode) Modifier.transformable(transformState) else Modifier)
+                    .then(if (!overlayFixedMode && busyLabel == null) Modifier.transformable(transformState) else Modifier)
                     .pointerInput(pointFixMode, overlayBitmap, hasStillBackground, selectedPointLockIndex) {
                         detectTapGestures { tap ->
-                            if (!overlayFixedMode && pointFixMode && hasStillBackground && overlayBitmap != null) {
+                            if (busyLabel == null && !overlayFixedMode && pointFixMode && hasStillBackground && overlayBitmap != null) {
                                 val lock = createPointLockAt(tap) ?: return@detectTapGestures
                                 when {
                                     selectedPointLockIndex in pointLocks.indices -> {
@@ -555,8 +582,7 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                         val invertOverlays = variant == EffectVariant.OverlayInverted
                         val drawSize = IntSize(size.width.toInt(), size.height.toInt())
 
-                        val layerAVisible = lockedLayerA != null && !hideLayerAUntilSecondLock
-                        if (layerAVisible) {
+                        if (lockedLayerA != null) {
                             drawOverlayLayer(lockedLayerA!!, previewForDraw = drawSize, invert = invertOverlays)
                         }
                         if (lockedLayerB != null) {
@@ -641,6 +667,7 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
 
                     if (uiState.showEditPanel) {
                         EditOverlayPanel(
+                            enabled = busyLabel == null,
                             scale = scaleF,
                             minScale = minScale,
                             maxScale = maxScale,
@@ -717,11 +744,11 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                             heatmapSimilarityThreshold = heatmapSimilarityThreshold,
                             heatmapPalette = heatmapPalette,
                             drawingInstruction = heatmapInstruction.takeIf { variant == EffectVariant.Heatmap },
+                            canAddOverlay = lockedLayerB == null,
                             onToggleHide = { hideAllOverlays = !hideAllOverlays },
                             onAddOverlay = {
                                 addOverlayPending = true
                                 overlayFixedMode = false
-                                hideLayerAUntilSecondLock = true
                                 resetWorkingOverlayTransform(clearPoints = true)
                                 overlayBitmap = null
                                 overlayUri = null
@@ -742,25 +769,41 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
     }
 }
 
+private suspend fun decodeBitmapForEditor(
+    context: android.content.Context,
+    uri: Uri,
+    maxEdge: Int = 4096,
+): Bitmap? = withContext(Dispatchers.IO) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        val source = ImageDecoder.createSource(context.contentResolver, uri)
+        ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+            decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+            decoder.setTargetSampleSize(
+                bitmapSampleSize(info.size.width, info.size.height, maxEdge),
+            )
+        }
+    } else {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        context.contentResolver.openInputStream(uri)?.use { stream ->
+            BitmapFactory.decodeStream(stream, null, bounds)
+        }
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@withContext null
+
+        val options = BitmapFactory.Options().apply {
+            inSampleSize = bitmapSampleSize(bounds.outWidth, bounds.outHeight, maxEdge)
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
+        context.contentResolver.openInputStream(uri)?.use { stream ->
+            BitmapFactory.decodeStream(stream, null, options)
+        }
+    }
+}
+
 private fun centerCropBitmap(source: Bitmap, targetWidth: Int, targetHeight: Int): Bitmap {
     if (targetWidth <= 0 || targetHeight <= 0) return source
-    val targetAspect = targetWidth.toFloat() / targetHeight
-    val sourceAspect = source.width.toFloat() / source.height
-
-    val cropWidth: Int
-    val cropHeight: Int
-    if (sourceAspect > targetAspect) {
-        cropHeight = source.height
-        cropWidth = (cropHeight * targetAspect).toInt().coerceIn(1, source.width)
-    } else {
-        cropWidth = source.width
-        cropHeight = (cropWidth / targetAspect).toInt().coerceIn(1, source.height)
-    }
-
-    if (cropWidth == source.width && cropHeight == source.height) return source
-    val left = (source.width - cropWidth) / 2
-    val top = (source.height - cropHeight) / 2
-    return Bitmap.createBitmap(source, left, top, cropWidth, cropHeight)
+    val crop = centerCropRect(source.width, source.height, targetWidth, targetHeight)
+    if (crop.width == source.width && crop.height == source.height) return source
+    return Bitmap.createBitmap(source, crop.left, crop.top, crop.width, crop.height)
 }
 
 private fun scaledCenterCropBitmap(source: Bitmap, width: Int, height: Int): Bitmap {
