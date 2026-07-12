@@ -13,11 +13,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 
-data class CameraHandle(
-    val imageCapture: ImageCapture,
-    val previewView: PreviewView,
-    val captureFrame: () -> Bitmap?
-)
+data class CameraHandle(val captureFrame: () -> Bitmap?)
 
 @Composable
 fun CameraPreview(
@@ -52,22 +48,15 @@ private fun bindCamera(
         val preview = Preview.Builder().build().also {
             it.setSurfaceProvider(previewView.surfaceProvider)
         }
-        val imageCapture = ImageCapture.Builder()
-            .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-            .build()
-
         val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
         try {
             cameraProvider.unbindAll()
             cameraProvider.bindToLifecycle(
                 (context as androidx.lifecycle.LifecycleOwner),
                 cameraSelector,
-                preview,
-                imageCapture
+                preview
             )
             bindHandle(CameraHandle(
-                imageCapture = imageCapture,
-                previewView = previewView,
                 // PreviewView exposes the most recent rendered frame when available.
                 captureFrame = { previewView.bitmap?.copy(Bitmap.Config.ARGB_8888, false) }
             ))

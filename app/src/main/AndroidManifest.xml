@@ -1,7 +1,6 @@
 <?xml version="1.0"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
   <uses-permission android:name="android.permission.CAMERA"/>
-  <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
   <application android:label="@string/app_name" android:allowBackup="true" android:supportsRtl="true" android:theme="@style/Theme.OverlayCam">
     <activity android:name=".MainActivity" android:exported="true">
       <intent-filter>

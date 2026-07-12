@@ -56,29 +56,6 @@ class OverlayUiStateTest {
     }
 
     @Test
-    fun controlsStayCompactExceptForDedicatedPointMatching() {
-        val live = OverlayUiState(hasStillBackground = false)
-        val ready = OverlayUiState(hasStillBackground = true)
-        val editing = OverlayUiState(hasStillBackground = true, hasOverlay = true)
-        val pointFix = OverlayUiState(
-            hasStillBackground = true,
-            hasOverlay = true,
-            isPointFixMode = true,
-        )
-        val fixed = OverlayUiState(
-            hasStillBackground = true,
-            hasOverlay = true,
-            isOverlayFixed = true,
-        )
-
-        assertFalse(live.controlsExpandedByDefault)
-        assertFalse(ready.controlsExpandedByDefault)
-        assertFalse(editing.controlsExpandedByDefault)
-        assertTrue(pointFix.controlsExpandedByDefault)
-        assertFalse(fixed.controlsExpandedByDefault)
-    }
-
-    @Test
     fun expansionActionNamesTheToolsItReveals() {
         assertEquals("Options", OverlayUiState(hasStillBackground = false).expandActionLabel)
         assertEquals("Options", OverlayUiState(hasStillBackground = true).expandActionLabel)
@@ -115,16 +92,6 @@ class OverlayUiStateTest {
 
         assertTrue(editing.showQuickOpacityControl)
         assertFalse(fixed.showQuickOpacityControl)
-    }
-
-    @Test
-    fun overlayManagementActionsStayBehindFineTuneDuringEditing() {
-        val editing = OverlayUiState(hasStillBackground = true, hasOverlay = true)
-        val ready = OverlayUiState(hasStillBackground = true)
-
-        assertFalse(editing.showManagementActions(expanded = false))
-        assertTrue(editing.showManagementActions(expanded = true))
-        assertTrue(ready.showManagementActions(expanded = false))
     }
 
     @Test

@@ -59,6 +59,7 @@ import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -491,6 +492,7 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                                 bitmap = bg,
                                 contentDescription = null,
                                 modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop,
                                 colorFilter = if (currentVariant == EffectVariant.BackgroundInverted) invertComposeColorFilter() else null
                             )
                         } else {

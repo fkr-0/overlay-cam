@@ -78,8 +78,6 @@ data class OverlayUiState(
         OverlayUiMode.FixedOverlay -> "Save the finished image to your gallery."
     }
 
-    val controlsExpandedByDefault: Boolean = mode == OverlayUiMode.PointFix
-
     val expandActionLabel: String = when (mode) {
         OverlayUiMode.Setup,
         OverlayUiMode.BackgroundReady -> "Options"
@@ -87,9 +85,6 @@ data class OverlayUiState(
         OverlayUiMode.PointFix -> "Point tools"
         OverlayUiMode.FixedOverlay -> "More actions"
     }
-
-    fun showManagementActions(expanded: Boolean): Boolean =
-        mode != OverlayUiMode.EditOverlay || expanded
 
     val showQuickOpacityControl: Boolean = mode == OverlayUiMode.EditOverlay
     val showGestureHint: Boolean = mode == OverlayUiMode.EditOverlay
