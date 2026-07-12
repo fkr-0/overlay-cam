@@ -742,6 +742,35 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
     }
 }
 
+private fun centerCropBitmap(source: Bitmap, targetWidth: Int, targetHeight: Int): Bitmap {
+    if (targetWidth <= 0 || targetHeight <= 0) return source
+    val targetAspect = targetWidth.toFloat() / targetHeight
+    val sourceAspect = source.width.toFloat() / source.height
+
+    val cropWidth: Int
+    val cropHeight: Int
+    if (sourceAspect > targetAspect) {
+        cropHeight = source.height
+        cropWidth = (cropHeight * targetAspect).toInt().coerceIn(1, source.width)
+    } else {
+        cropWidth = source.width
+        cropHeight = (cropWidth / targetAspect).toInt().coerceIn(1, source.height)
+    }
+
+    if (cropWidth == source.width && cropHeight == source.height) return source
+    val left = (source.width - cropWidth) / 2
+    val top = (source.height - cropHeight) / 2
+    return Bitmap.createBitmap(source, left, top, cropWidth, cropHeight)
+}
+
+private fun scaledCenterCropBitmap(source: Bitmap, width: Int, height: Int): Bitmap {
+    val cropped = centerCropBitmap(source, width, height)
+    if (cropped.width == width && cropped.height == height) return cropped
+    val scaled = Bitmap.createScaledBitmap(cropped, width, height, true)
+    if (cropped !== source) cropped.recycle()
+    return scaled
+}
+
 private fun DrawScope.drawOverlayLayer(layer: OverlayLayer, previewForDraw: IntSize, invert: Boolean) {
     val matrix = buildOverlayMatrix(
         previewSize = previewForDraw,
@@ -802,9 +831,11 @@ private suspend fun saveCompositeLayers(
                 }
             }
 
-            val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
-                ?: return@withContext SaveCompositeResult("Could not create a gallery image")
+            var insertedUri: Uri? = null
             try {
+                val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                    ?: return@withContext SaveCompositeResult("Could not create a gallery image")
+                insertedUri = uri
                 val written = resolver.openOutputStream(uri)?.use { stream ->
                     outBitmap.compress(Bitmap.CompressFormat.JPEG, 92, stream)
                 } == true
@@ -822,7 +853,7 @@ private suspend fun saveCompositeLayers(
                 }
                 SaveCompositeResult("Saved to Pictures/OverlayCam")
             } catch (error: Throwable) {
-                resolver.delete(uri, null, null)
+                insertedUri?.let { resolver.delete(it, null, null) }
                 SaveCompositeResult("Save failed: ${error.message ?: "unknown error"}")
             } finally {
                 outBitmap.recycle()
@@ -852,7 +883,7 @@ private fun estimateOverlayAutoAlignment(
     val matchWidth = kotlin.math.max(24, (previewSize.width * downscale).toInt())
     val matchHeight = kotlin.math.max(24, (previewSize.height * downscale).toInt())
 
-    val backgroundMatch = Bitmap.createScaledBitmap(background, matchWidth, matchHeight, true)
+    val backgroundMatch = scaledCenterCropBitmap(background, matchWidth, matchHeight)
     val overlayMatch = Bitmap.createBitmap(matchWidth, matchHeight, Bitmap.Config.ARGB_8888)
     val overlayCanvas = Canvas(overlayMatch)
     val scaledLocks = fixedPoints.map { lock ->
@@ -957,10 +988,15 @@ private fun composeLayers(
     heatmapSimilarityThreshold: Float,
     heatmapPalette: HeatmapPalette
 ): Bitmap {
-    val sx = camBitmap.width.toFloat() / previewSize.width
-    val sy = camBitmap.height.toFloat() / previewSize.height
+    val renderedBackground = centerCropBitmap(camBitmap, previewSize.width, previewSize.height)
+    val sx = renderedBackground.width.toFloat() / previewSize.width
+    val sy = renderedBackground.height.toFloat() / previewSize.height
 
-    val outBitmap = Bitmap.createBitmap(camBitmap.width, camBitmap.height, Bitmap.Config.ARGB_8888)
+    val outBitmap = Bitmap.createBitmap(
+        renderedBackground.width,
+        renderedBackground.height,
+        Bitmap.Config.ARGB_8888,
+    )
     val canvas = Canvas(outBitmap)
 
     val basePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -969,14 +1005,14 @@ private fun composeLayers(
     }
 
     if (!flipOverlayAndBackground && variant != EffectVariant.Heatmap) {
-        canvas.drawBitmap(camBitmap, 0f, 0f, basePaint)
+        canvas.drawBitmap(renderedBackground, 0f, 0f, basePaint)
     }
 
     if (variant == EffectVariant.Heatmap) {
         val heatmap = buildHeatmapRender(
-            background = camBitmap,
-            outputWidth = camBitmap.width,
-            outputHeight = camBitmap.height,
+            background = renderedBackground,
+            outputWidth = renderedBackground.width,
+            outputHeight = renderedBackground.height,
             layers = layers,
             similarityThreshold = heatmapSimilarityThreshold,
             palette = heatmapPalette,
@@ -1029,9 +1065,10 @@ private fun composeLayers(
             isFilterBitmap = true
             if (variant == EffectVariant.BackgroundInverted) colorFilter = invertAndroidColorFilter()
         }
-        canvas.drawBitmap(camBitmap, 0f, 0f, p)
+        canvas.drawBitmap(renderedBackground, 0f, 0f, p)
     }
 
+    if (renderedBackground !== camBitmap) renderedBackground.recycle()
     return outBitmap
 }
 
@@ -1106,11 +1143,7 @@ private fun buildHeatmapRender(
     if (layers.isEmpty()) return null
     if (outputWidth <= 0 || outputHeight <= 0) return null
 
-    val bg = if (background.width == outputWidth && background.height == outputHeight) {
-        background
-    } else {
-        Bitmap.createScaledBitmap(background, outputWidth, outputHeight, true)
-    }
+    val bg = scaledCenterCropBitmap(background, outputWidth, outputHeight)
 
     val overlayComposite = Bitmap.createBitmap(outputWidth, outputHeight, Bitmap.Config.ARGB_8888)
     val overlayCanvas = Canvas(overlayComposite)
