@@ -1,131 +1,189 @@
 package com.example.overlaycam
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AssistChip
+import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 
 @Composable
-internal fun OverlayControlSheet(
+internal fun OverlayControlDock(
     modifier: Modifier = Modifier,
-    expanded: Boolean,
-    onExpandedChange: (Boolean) -> Unit,
-    stageLabel: String,
-    title: String,
-    guidance: String,
-    expandActionLabel: String,
-    collapsedContent: @Composable ColumnScope.() -> Unit,
-    content: @Composable ColumnScope.() -> Unit,
+    state: OverlayUiState,
+    busyLabel: String?,
+    opacity: Float,
+    onOpacityChange: (Float) -> Unit,
+    onRecommendedAction: () -> Unit,
+    onOpenTools: () -> Unit,
 ) {
+    val isBusy = busyLabel != null
     Surface(
         modifier = modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .imePadding()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .animateContentSize(),
         shape = MaterialTheme.shapes.extraLarge,
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
         tonalElevation = 6.dp,
-        shadowElevation = 10.dp,
+        shadowElevation = 12.dp,
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                StagePill(state.stageLabel)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(state.title, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        text = busyLabel ?: state.recommendedActionHint,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                TextButton(
+                    enabled = !isBusy,
+                    onClick = onOpenTools,
+                ) {
+                    Text(state.expandActionLabel)
+                }
+            }
+
+            Button(
+                enabled = !isBusy,
+                onClick = onRecommendedAction,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                if (isBusy) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                    )
+                    Spacer(Modifier.size(8.dp))
+                    Text(busyLabel)
+                } else {
+                    Text(state.recommendedActionLabel)
+                }
+            }
+
+            if (state.showQuickOpacityControl && !isBusy) {
+                QuickOpacityControl(
+                    opacity = opacity,
+                    onOpacityChange = onOpacityChange,
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun OverlayToolsSheet(
+    state: OverlayUiState,
+    onDismissRequest: () -> Unit,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val maxHeight = (LocalConfiguration.current.screenHeightDp * 0.9f).dp
+
+    ModalBottomSheet(
+        onDismissRequest = onDismissRequest,
+        sheetState = sheetState,
+        dragHandle = { BottomSheetDefaults.DragHandle() },
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .then(if (expanded) Modifier.verticalScroll(rememberScrollState()) else Modifier)
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+                .heightIn(max = maxHeight)
+                .verticalScroll(rememberScrollState())
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.CenterHorizontally)
-                    .width(42.dp)
-                    .height(4.dp)
-                    .background(
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
-                        shape = RoundedCornerShape(50),
-                    )
-            )
-
-            var dragTotal = 0f
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .pointerInput(expanded) {
-                        detectVerticalDragGestures(
-                            onVerticalDrag = { _, dragAmount -> dragTotal += dragAmount },
-                            onDragEnd = {
-                                if (dragTotal < -48f) onExpandedChange(true)
-                                if (dragTotal > 48f) onExpandedChange(false)
-                                dragTotal = 0f
-                            },
-                            onDragCancel = { dragTotal = 0f },
-                        )
-                    },
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                AssistChip(
-                    onClick = { onExpandedChange(!expanded) },
-                    label = { Text(stageLabel) },
-                )
+                StagePill(state.stageLabel)
                 Text(
-                    text = title,
+                    text = state.title,
                     modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.headlineSmall,
                 )
-                TextButton(onClick = { onExpandedChange(!expanded) }) {
-                    Text(if (expanded) "Close" else expandActionLabel)
+                TextButton(onClick = onDismissRequest) {
+                    Text("Done")
                 }
             }
-
-            if (expanded) {
-                Text(
-                    text = guidance,
-                    modifier = Modifier.widthIn(max = 520.dp),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                HorizontalDivider()
-                content()
-            } else {
-                collapsedContent()
-            }
+            Text(
+                text = state.guidance,
+                modifier = Modifier.widthIn(max = 560.dp),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            HorizontalDivider()
+            content()
+            Spacer(Modifier.height(24.dp))
         }
+    }
+}
+
+@Composable
+private fun StagePill(label: String) {
+    Surface(
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            style = MaterialTheme.typography.labelMedium,
+        )
     }
 }
 
 @Composable
 internal fun WorkflowActionPanel(
     state: OverlayUiState,
-    expanded: Boolean,
+    enabled: Boolean,
     onRecommendedAction: () -> Unit,
     onFreezeCamera: () -> Unit,
     onPickBackground: () -> Unit,
@@ -135,6 +193,7 @@ internal fun WorkflowActionPanel(
     onAdjustAgain: () -> Unit,
 ) {
     Button(
+        enabled = enabled,
         onClick = onRecommendedAction,
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -148,40 +207,35 @@ internal fun WorkflowActionPanel(
     )
 
     if (state.showGestureHint) {
-        Text(
-            text = "Drag to move  •  Pinch to resize  •  Twist to rotate",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.primary,
+        WorkflowCallout(
+            label = "Direct manipulation",
+            text = "Drag to move, pinch to resize, and twist to rotate. The sliders below provide precise and accessible alternatives.",
         )
     }
 
     when (state.mode) {
-        OverlayUiMode.Setup -> ActionRow {
-            OutlinedButton(onClick = onPickBackground) { Text("Use background photo") }
-        }
-
-        OverlayUiMode.BackgroundReady -> ActionRow(fill = true, alignCenter = true) {
-            OutlinedButton(onClick = onFreezeCamera) { Text("Refreeze") }
-            OutlinedButton(onClick = onPickBackground) { Text("Change background") }
-            if (expanded) {
-                OutlinedButton(onClick = onReturnToLiveCamera) { Text("Live camera") }
+        OverlayUiMode.Setup -> ActionFlow {
+            OutlinedButton(enabled = enabled, onClick = onPickBackground) {
+                Text("Use background photo")
             }
         }
 
-        OverlayUiMode.EditOverlay -> {
-            if (state.showManagementActions(expanded)) {
-                ActionRow(fill = true, alignCenter = true) {
-                    OutlinedButton(onClick = onResetOverlay) { Text("Reset overlay") }
-                    OutlinedButton(onClick = onPickOverlay) { Text("Change overlay") }
-                    OutlinedButton(onClick = onPickBackground) { Text("Change background") }
-                }
-            }
+        OverlayUiMode.BackgroundReady -> ActionFlow {
+            OutlinedButton(enabled = enabled, onClick = onFreezeCamera) { Text("Refreeze") }
+            OutlinedButton(enabled = enabled, onClick = onPickBackground) { Text("Change background") }
+            OutlinedButton(enabled = enabled, onClick = onReturnToLiveCamera) { Text("Live camera") }
+        }
+
+        OverlayUiMode.EditOverlay -> ActionFlow {
+            OutlinedButton(enabled = enabled, onClick = onResetOverlay) { Text("Reset overlay") }
+            OutlinedButton(enabled = enabled, onClick = onPickOverlay) { Text("Change overlay") }
+            OutlinedButton(enabled = enabled, onClick = onPickBackground) { Text("Change background") }
         }
 
         OverlayUiMode.PointFix -> Unit
 
-        OverlayUiMode.FixedOverlay -> ActionRow {
-            OutlinedButton(onClick = onAdjustAgain) { Text("Adjust again") }
+        OverlayUiMode.FixedOverlay -> ActionFlow {
+            OutlinedButton(enabled = enabled, onClick = onAdjustAgain) { Text("Adjust again") }
         }
     }
 }
@@ -241,7 +295,7 @@ internal fun EditOverlayPanel(
         onValueChange = { onRotationChange(it.coerceIn(-180f, 180f)) },
     )
 
-    ActionRow {
+    ActionFlow {
         OutlinedButton(onClick = onReset) { Text("Reset") }
         OutlinedButton(
             enabled = canAutoAlign && !autoAlignInProgress,
@@ -280,6 +334,7 @@ private fun AdjustmentSlider(
         )
     }
     Slider(
+        modifier = Modifier.semantics { contentDescription = label },
         value = value,
         onValueChange = onValueChange,
         valueRange = valueRange,
@@ -297,7 +352,7 @@ internal fun PointFixPanel(
         text = "Tap one or two recognizable points. One point fixes position; two also correct size and rotation.",
     )
     Text("Points placed: $pointCount of 2", style = MaterialTheme.typography.bodySmall)
-    ActionRow {
+    ActionFlow {
         OutlinedButton(onClick = onClearPoints) { Text("Clear points") }
         OutlinedButton(onClick = onResetZoom) { Text("Reset zoom") }
     }
@@ -315,21 +370,30 @@ internal fun FixedOverlayActionsPanel(
     onToggleHide: () -> Unit,
     onAddOverlay: () -> Unit,
     onToggleFlip: () -> Unit,
-    onNextEffect: () -> Unit,
+    onEffectChange: (EffectVariant) -> Unit,
     onFrozenOverlayOpacityChange: (Float) -> Unit,
     onHeatmapSimilarityThresholdChange: (Float) -> Unit,
     onHeatmapPaletteChange: (HeatmapPalette) -> Unit,
 ) {
-    Text("More options", style = MaterialTheme.typography.titleSmall)
-    ActionRow(fill = true, alignCenter = true) {
+    Text("Display and comparison", style = MaterialTheme.typography.titleSmall)
+
+    Text("Display mode", style = MaterialTheme.typography.labelLarge)
+    ActionFlow {
+        EffectVariant.entries.forEach { option ->
+            OutlinedButton(onClick = { onEffectChange(option) }) {
+                Text(if (variant == option) "${option.label} ✓" else option.label)
+            }
+        }
+    }
+
+    ActionFlow {
         OutlinedButton(onClick = onToggleHide) {
             Text(if (hideAllOverlays) "Show overlay" else "Hide overlay")
         }
         OutlinedButton(onClick = onAddOverlay) { Text("Add another overlay") }
         OutlinedButton(onClick = onToggleFlip) {
-            Text(if (flipOverlayAndBackground) "Background on top" else "Put background on top")
+            Text(if (flipOverlayAndBackground) "Background below" else "Background on top")
         }
-        OutlinedButton(onClick = onNextEffect) { Text("Next effect") }
     }
 
     if (flipOverlayAndBackground) {
@@ -356,7 +420,8 @@ internal fun FixedOverlayActionsPanel(
             valueRange = 0.5f..0.99f,
             onValueChange = { onHeatmapSimilarityThresholdChange(it.coerceIn(0.5f, 0.99f)) },
         )
-        ActionRow {
+        Text("Heatmap palette", style = MaterialTheme.typography.labelLarge)
+        ActionFlow {
             OutlinedButton(onClick = { onHeatmapPaletteChange(HeatmapPalette.Color) }) {
                 Text(if (heatmapPalette == HeatmapPalette.Color) "Color ✓" else "Color")
             }
@@ -368,14 +433,14 @@ internal fun FixedOverlayActionsPanel(
 }
 
 @Composable
-private fun WorkflowCallout(
+internal fun WorkflowCallout(
     label: String,
     text: String,
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.medium,
-        tonalElevation = 2.dp,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
@@ -384,25 +449,20 @@ private fun WorkflowCallout(
             Text(text = label, style = MaterialTheme.typography.labelMedium)
             Text(
                 text = text,
-                modifier = Modifier.widthIn(max = 520.dp),
+                modifier = Modifier.widthIn(max = 560.dp),
                 style = MaterialTheme.typography.bodySmall,
             )
         }
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ActionRow(
-    fill: Boolean = false,
-    alignCenter: Boolean = false,
-    content: @Composable () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .then(if (fill) Modifier.fillMaxWidth() else Modifier)
-            .horizontalScroll(rememberScrollState()),
-        verticalAlignment = if (alignCenter) Alignment.CenterVertically else Alignment.Top,
+private fun ActionFlow(content: @Composable () -> Unit) {
+    FlowRow(
+        modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         content()
     }

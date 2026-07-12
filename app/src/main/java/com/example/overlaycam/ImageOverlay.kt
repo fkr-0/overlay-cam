@@ -11,28 +11,26 @@ import android.graphics.Paint
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
-import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.camera.core.ImageCapture
-import androidx.camera.core.ImageCaptureException
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.TransformableState
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -59,19 +57,17 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
-import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.semantics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Locale
 
@@ -79,6 +75,7 @@ import java.util.Locale
 fun OverlayScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
 
     CameraPermissionGate {
         var handle by remember { mutableStateOf<CameraHandle?>(null) }
@@ -90,6 +87,9 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
 
         var overlayUri by remember { mutableStateOf<Uri?>(null) }
         var overlayBitmap by remember { mutableStateOf<Bitmap?>(null) }
+        var backgroundLoadInProgress by remember { mutableStateOf(false) }
+        var overlayLoadInProgress by remember { mutableStateOf(false) }
+        var saveInProgress by remember { mutableStateOf(false) }
 
         val minScale = 0.5f
         val maxScale = 2.0f
@@ -98,9 +98,6 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
         var rotationDeg by remember { mutableFloatStateOf(0f) }
         var offsetX by remember { mutableFloatStateOf(0f) }
         var offsetY by remember { mutableFloatStateOf(0f) }
-
-        var cropMode by remember { mutableStateOf(false) }
-        var cropRect by remember { mutableStateOf(android.graphics.RectF(120f, 160f, 800f, 1200f)) }
 
         var pointFixMode by remember { mutableStateOf(false) }
         val pointLocks = remember { mutableStateListOf<FixedPointLock>() }
@@ -190,7 +187,9 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
         val photoPickerLauncher =
             if (Build.VERSION.SDK_INT >= 33) {
                 rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-                    if (pickerTarget == PickerTarget.Background) backgroundUri = uri else overlayUri = uri
+                    uri?.let {
+                        if (pickerTarget == PickerTarget.Background) backgroundUri = it else overlayUri = it
+                    }
                 }
             } else null
 
@@ -202,8 +201,8 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                             it,
                             android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
                         )
+                        if (pickerTarget == PickerTarget.Background) backgroundUri = it else overlayUri = it
                     }
-                    if (pickerTarget == PickerTarget.Background) backgroundUri = uri else overlayUri = uri
                 }
             } else null
 
@@ -219,11 +218,17 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
         }
 
         LaunchedEffect(backgroundUri) {
-            val bmp = loadBitmap(backgroundUri)
-            backgroundBitmap?.recycle()
-            backgroundBitmap = bmp
-            backgroundImage = bmp?.asImageBitmap()
-            if (bmp != null) {
+            val uri = backgroundUri ?: return@LaunchedEffect
+            backgroundLoadInProgress = true
+            try {
+                val bmp = loadBitmap(uri)
+                if (bmp == null) {
+                    snackbarHostState.showSnackbar("Could not load that background image")
+                    return@LaunchedEffect
+                }
+                backgroundBitmap?.recycle()
+                backgroundBitmap = bmp
+                backgroundImage = bmp.asImageBitmap()
                 overlayFixedMode = false
                 hideAllOverlays = false
                 lockedLayerA = null
@@ -231,11 +236,24 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                 addOverlayPending = false
                 hideLayerAUntilSecondLock = false
                 resetWorkingOverlayTransform(clearPoints = true)
+            } finally {
+                backgroundLoadInProgress = false
             }
         }
 
         LaunchedEffect(overlayUri) {
-            overlayBitmap = loadBitmap(overlayUri)
+            val uri = overlayUri ?: return@LaunchedEffect
+            overlayLoadInProgress = true
+            try {
+                val bmp = loadBitmap(uri)
+                if (bmp == null) {
+                    snackbarHostState.showSnackbar("Could not load that overlay image")
+                    return@LaunchedEffect
+                }
+                overlayBitmap = bmp
+            } finally {
+                overlayLoadInProgress = false
+            }
         }
 
         val hasStillBackground = backgroundBitmap != null
@@ -308,10 +326,27 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
             isPointFixMode = pointFixMode,
         )
 
-        var controlsExpanded by remember { mutableStateOf(false) }
+        var showTools by remember { mutableStateOf(false) }
+        val busyLabel = when {
+            saveInProgress -> "Saving image…"
+            backgroundLoadInProgress -> "Loading background…"
+            overlayLoadInProgress -> "Loading overlay…"
+            autoAlignInProgress -> "Matching image…"
+            else -> null
+        }
 
         LaunchedEffect(uiState.mode) {
-            controlsExpanded = uiState.controlsExpandedByDefault
+            showTools = false
+        }
+
+        BackHandler(enabled = showTools || pointFixMode) {
+            when {
+                showTools -> showTools = false
+                pointFixMode -> {
+                    pointFixMode = false
+                    pointFixZoom = 1f
+                }
+            }
         }
 
         fun freezeCameraBackground(successMessage: String = "Background frozen") {
@@ -320,10 +355,10 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                 backgroundBitmap?.recycle()
                 backgroundBitmap = bmp
                 backgroundImage = bmp.asImageBitmap()
-                controlsExpanded = false
-                Toast.makeText(context, successMessage, Toast.LENGTH_SHORT).show()
+                showTools = false
+                coroutineScope.launch { snackbarHostState.showSnackbar(successMessage) }
             } else {
-                Toast.makeText(context, "No camera frame yet", Toast.LENGTH_SHORT).show()
+                coroutineScope.launch { snackbarHostState.showSnackbar("Camera is still starting") }
             }
         }
 
@@ -339,8 +374,7 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
             addOverlayPending = false
             hideLayerAUntilSecondLock = false
             resetWorkingOverlayTransform(clearPoints = true)
-            cropMode = false
-            controlsExpanded = false
+            showTools = false
         }
 
         fun lockWorkingOverlay() {
@@ -352,7 +386,7 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
             hideLayerAUntilSecondLock = false
             overlayFixedMode = true
             pointFixMode = false
-            controlsExpanded = false
+            showTools = false
         }
 
         fun reopenLatestOverlayForEditing() {
@@ -371,41 +405,58 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
             pointFixMode = false
             addOverlayPending = false
             hideLayerAUntilSecondLock = false
-            controlsExpanded = true
+            showTools = true
         }
 
         fun saveCurrentComposite() {
+            if (saveInProgress) return
             val layers = listOfNotNull(
                 if (hideAllOverlays || hideLayerAUntilSecondLock) null else lockedLayerA,
                 if (hideAllOverlays) null else lockedLayerB,
                 currentWorkingLayerOrNull()?.takeIf { addOverlayPending }
             )
-            saveCompositeLayers(
-                context = context,
-                imageCapture = null,
-                previewSize = previewSize,
-                layers = layers,
-                cropRect = if (cropMode) cropRect else null,
-                frozen = backgroundBitmap,
-                variant = variant,
-                flipOverlayAndBackground = flipOverlayAndBackground,
-                frozenOverlayOpacity = frozenOverlayOpacity,
-                heatmapSimilarityThreshold = heatmapSimilarityThreshold,
-                heatmapPalette = heatmapPalette,
-            )
+            val frozen = backgroundBitmap
+            when {
+                layers.isEmpty() -> coroutineScope.launch {
+                    snackbarHostState.showSnackbar("There is no visible overlay to save")
+                }
+                frozen == null -> coroutineScope.launch {
+                    snackbarHostState.showSnackbar("Freeze or load a background first")
+                }
+                else -> {
+                    saveInProgress = true
+                    showTools = false
+                    coroutineScope.launch {
+                        val result = saveCompositeLayers(
+                            context = context,
+                            previewSize = previewSize,
+                            layers = layers,
+                            frozen = frozen,
+                            variant = variant,
+                            flipOverlayAndBackground = flipOverlayAndBackground,
+                            frozenOverlayOpacity = frozenOverlayOpacity,
+                            heatmapSimilarityThreshold = heatmapSimilarityThreshold,
+                            heatmapPalette = heatmapPalette,
+                        )
+                        saveInProgress = false
+                        snackbarHostState.showSnackbar(result.message)
+                    }
+                }
+            }
         }
 
         fun runRecommendedAction() {
             when (uiState.recommendedAction) {
                 OverlayRecommendedAction.FreezeFrame -> freezeCameraBackground()
                 OverlayRecommendedAction.PickOverlay -> {
-                    controlsExpanded = false
+                    showTools = false
                     launchImagePicker(PickerTarget.Overlay)
                 }
                 OverlayRecommendedAction.FinishAdjusting -> lockWorkingOverlay()
                 OverlayRecommendedAction.FinishPointFix -> {
                     pointFixMode = false
-                    controlsExpanded = true
+                    pointFixZoom = 1f
+                    showTools = false
                 }
                 OverlayRecommendedAction.SaveImage -> saveCurrentComposite()
             }
