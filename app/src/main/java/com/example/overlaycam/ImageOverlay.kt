@@ -1,6 +1,8 @@
 package com.example.overlaycam
 
+import android.Manifest
 import android.content.ContentValues
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -66,6 +68,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -93,6 +96,7 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
         var backgroundLoadInProgress by remember { mutableStateOf(false) }
         var overlayLoadInProgress by remember { mutableStateOf(false) }
         var saveInProgress by remember { mutableStateOf(false) }
+        var retrySaveAfterPermission by remember { mutableStateOf(false) }
 
         val minScale = 0.5f
         val maxScale = 2.0f
@@ -152,6 +156,13 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
         DisposableEffect(Unit) {
             onDispose {
                 heatmapBitmap?.takeUnless(Bitmap::isRecycled)?.recycle()
+            }
+        }
+
+        LaunchedEffect(retrySaveAfterPermission) {
+            if (retrySaveAfterPermission) {
+                retrySaveAfterPermission = false
+                saveCurrentComposite()
             }
         }
 
@@ -216,6 +227,18 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                     }
                 }
             } else null
+
+        val legacyWritePermissionLauncher = rememberLauncherForActivityResult(
+            ActivityResultContracts.RequestPermission(),
+        ) { granted ->
+            if (granted) {
+                retrySaveAfterPermission = true
+            } else {
+                coroutineScope.launch {
+                    snackbarHostState.showSnackbar("Storage access is needed to save on this Android version")
+                }
+            }
+        }
 
         val openDocLauncher =
             if (Build.VERSION.SDK_INT < 33) {
@@ -429,6 +452,16 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
 
         fun saveCurrentComposite() {
             if (saveInProgress) return
+            val needsLegacyWritePermission =
+                Build.VERSION.SDK_INT <= Build.VERSION_CODES.P &&
+                    ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.WRITE_EXTERNAL_STORAGE,
+                    ) != PackageManager.PERMISSION_GRANTED
+            if (needsLegacyWritePermission) {
+                legacyWritePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                return
+            }
             val layers = listOfNotNull(
                 if (hideAllOverlays) null else lockedLayerA,
                 if (hideAllOverlays) null else lockedLayerB,
