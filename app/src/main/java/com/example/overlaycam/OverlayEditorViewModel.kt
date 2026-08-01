@@ -27,6 +27,11 @@ internal class OverlayEditorViewModel : ViewModel() {
     val pendingPointScreenPosition = mutableStateOf<Offset?>(null)
     val pointFixZoom = mutableFloatStateOf(1f)
 
+    val repositionEnabled = mutableStateOf(true)
+    val viewportScale = mutableFloatStateOf(1f)
+    val viewportOffsetX = mutableFloatStateOf(0f)
+    val viewportOffsetY = mutableFloatStateOf(0f)
+
     val overlayFixedMode = mutableStateOf(false)
     val lockedLayerA = mutableStateOf<OverlayLayer?>(null)
     val lockedLayerB = mutableStateOf<OverlayLayer?>(null)

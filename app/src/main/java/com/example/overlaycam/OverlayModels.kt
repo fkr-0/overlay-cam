@@ -18,11 +18,28 @@ internal data class FixedPointLock(
     val target: Offset,
 )
 
-internal enum class EffectVariant(val label: String) {
-    Normal("Normal"),
-    BackgroundInverted("BG Inverted"),
-    OverlayInverted("Overlay Inverted"),
-    Heatmap("Heatmap"),
+internal enum class GuidanceVisualization {
+    Similarity,
+    Difference,
+    Edges,
+}
+
+internal enum class EffectVariant(
+    val label: String,
+    val shortLabel: String,
+    val guidanceVisualization: GuidanceVisualization? = null,
+    val showInComparisonBar: Boolean = true,
+) {
+    Normal("Overlay", "Overlay"),
+    Similarity("Similarity", "Match", GuidanceVisualization.Similarity),
+    Difference("Value difference", "Values", GuidanceVisualization.Difference),
+    Edges("Contour alignment", "Edges", GuidanceVisualization.Edges),
+    BackgroundInverted("Background inverted", "BG invert", showInComparisonBar = false),
+    OverlayInverted("Overlay inverted", "Overlay invert", showInComparisonBar = false),
+    ;
+
+    val isGuidance: Boolean
+        get() = guidanceVisualization != null
 }
 
 internal enum class HeatmapPalette(val label: String) {

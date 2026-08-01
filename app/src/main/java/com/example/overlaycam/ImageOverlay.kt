@@ -75,6 +75,7 @@ import androidx.exifinterface.media.ExifInterface
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -118,6 +119,11 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
         var pendingPointScreenPosition by editor.pendingPointScreenPosition
         var pointFixZoom by editor.pointFixZoom
 
+        var repositionEnabled by editor.repositionEnabled
+        var viewportScale by editor.viewportScale
+        var viewportOffsetX by editor.viewportOffsetX
+        var viewportOffsetY by editor.viewportOffsetY
+
         var overlayFixedMode by editor.overlayFixedMode
         var lockedLayerA by editor.lockedLayerA
         var lockedLayerB by editor.lockedLayerB
@@ -130,9 +136,11 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
         val variants = EffectVariant.entries
         val variant = variants[variantIndex]
 
-        var heatmapBitmap by remember { mutableStateOf<Bitmap?>(null) }
-        var heatmapImage by remember { mutableStateOf<ImageBitmap?>(null) }
-        var heatmapInstruction by remember { mutableStateOf<DrawingInstruction?>(null) }
+        var guidanceBitmap by remember { mutableStateOf<Bitmap?>(null) }
+        var guidanceImage by remember { mutableStateOf<ImageBitmap?>(null) }
+        var guidanceInstruction by remember { mutableStateOf<DrawingInstruction?>(null) }
+        var guidanceSummary by remember { mutableStateOf<OverlayDiffSummary?>(null) }
+        var guidanceUpdating by remember { mutableStateOf(false) }
         var heatmapSimilarityThreshold by editor.heatmapSimilarityThreshold
         var heatmapPalette by editor.heatmapPalette
 
@@ -154,17 +162,24 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
             overlayUri = null
             lockedLayerA = null
             lockedLayerB = null
-            heatmapBitmap?.takeUnless(Bitmap::isRecycled)?.recycle()
-            heatmapBitmap = null
-            heatmapImage = null
-            heatmapInstruction = null
+            guidanceBitmap?.takeUnless(Bitmap::isRecycled)?.recycle()
+            guidanceBitmap = null
+            guidanceImage = null
+            guidanceInstruction = null
+            guidanceSummary = null
             variantIndex = EffectVariant.Normal.ordinal
         }
 
         DisposableEffect(Unit) {
             onDispose {
-                heatmapBitmap?.takeUnless(Bitmap::isRecycled)?.recycle()
+                guidanceBitmap?.takeUnless(Bitmap::isRecycled)?.recycle()
             }
+        }
+
+        fun resetViewport() {
+            viewportScale = 1f
+            viewportOffsetX = 0f
+            viewportOffsetY = 0f
         }
 
         fun resetWorkingOverlayTransform(clearPoints: Boolean = true) {
@@ -173,6 +188,8 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
             offsetX = 0f
             offsetY = 0f
             opacity = 0.7f
+            repositionEnabled = true
+            resetViewport()
             if (clearPoints) {
                 pointLocks.clear()
                 pendingPointSource = null
@@ -185,7 +202,7 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
             val bmp = overlayBitmap ?: return null
             return OverlayLayer(
                 bitmap = bmp,
-                opacity = opacity,
+                opacity = 1f,
                 scale = scaleF,
                 rotation = rotationDeg,
                 offsetX = offsetX,
@@ -329,17 +346,23 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
             heatmapSimilarityThreshold,
             heatmapPalette
         ) {
-            if (variant == EffectVariant.Heatmap && hasStillBackground && previewSize.width > 1 && previewSize.height > 1 && visibleLayersForEffects.isNotEmpty()) {
-                var generated: HeatmapRender? = null
+            if (variant.isGuidance && hasStillBackground && previewSize.width > 1 && previewSize.height > 1 && visibleLayersForEffects.isNotEmpty()) {
+                guidanceUpdating = true
+                delay(120)
+                var generated: GuidanceRender? = null
                 try {
+                    val renderSize = guidanceRenderSize(previewSize)
+                    val sx = renderSize.width.toFloat() / previewSize.width
+                    val sy = renderSize.height.toFloat() / previewSize.height
                     generated = withContext(Dispatchers.Default) {
-                        buildHeatmapRender(
+                        buildGuidanceRender(
                             background = backgroundBitmap!!,
-                            outputWidth = previewSize.width,
-                            outputHeight = previewSize.height,
+                            outputWidth = renderSize.width,
+                            outputHeight = renderSize.height,
                             layers = visibleLayersForEffects,
                             similarityThreshold = heatmapSimilarityThreshold,
                             palette = heatmapPalette,
+                            visualization = variant.guidanceVisualization!!,
                             matrixForLayer = { layer ->
                                 buildOverlayMatrix(
                                     previewSize = previewSize,
@@ -349,32 +372,39 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                                     offsetX = layer.offsetX,
                                     offsetY = layer.offsetY,
                                     fixedPoints = layer.fixedPoints,
+                                    sx = sx,
+                                    sy = sy,
                                 )
                             },
                         )
                     }
                     currentCoroutineContext().ensureActive()
-                    heatmapBitmap?.takeUnless(Bitmap::isRecycled)?.recycle()
-                    heatmapBitmap = generated?.bitmap
-                    heatmapImage = generated?.bitmap?.asImageBitmap()
-                    heatmapInstruction = generated?.instruction
+                    guidanceBitmap?.takeUnless(Bitmap::isRecycled)?.recycle()
+                    guidanceBitmap = generated?.bitmap
+                    guidanceImage = generated?.bitmap?.asImageBitmap()
+                    guidanceInstruction = generated?.instruction
+                    guidanceSummary = generated?.summary
                     generated = null
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (_: Exception) {
-                    heatmapBitmap?.takeUnless(Bitmap::isRecycled)?.recycle()
-                    heatmapBitmap = null
-                    heatmapImage = null
-                    heatmapInstruction = null
-                    snackbarHostState.showSnackbar("Could not generate the comparison heatmap")
+                    guidanceBitmap?.takeUnless(Bitmap::isRecycled)?.recycle()
+                    guidanceBitmap = null
+                    guidanceImage = null
+                    guidanceInstruction = null
+                    guidanceSummary = null
+                    snackbarHostState.showSnackbar("Could not generate the comparison guide")
                 } finally {
                     generated?.bitmap?.takeUnless(Bitmap::isRecycled)?.recycle()
+                    guidanceUpdating = false
                 }
             } else {
-                heatmapBitmap?.takeUnless(Bitmap::isRecycled)?.recycle()
-                heatmapBitmap = null
-                heatmapImage = null
-                heatmapInstruction = null
+                guidanceBitmap?.takeUnless(Bitmap::isRecycled)?.recycle()
+                guidanceBitmap = null
+                guidanceImage = null
+                guidanceInstruction = null
+                guidanceSummary = null
+                guidanceUpdating = false
             }
         }
 
@@ -389,6 +419,7 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
             hasOverlay = currentWorkingLayerOrNull() != null || lockedLayerA != null || lockedLayerB != null,
             isOverlayFixed = overlayFixedMode,
             isPointFixMode = pointFixMode,
+            isRepositionEnabled = repositionEnabled && !overlayFixedMode,
         )
         val pointMatchUiState = PointMatchUiState(
             completedPointCount = pointLocks.size,
@@ -456,6 +487,7 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
             overlayUri = null
             addOverlayPending = false
             overlayFixedMode = true
+            repositionEnabled = false
             pointFixMode = false
             showTools = false
         }
@@ -464,7 +496,6 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
             val layer = lockedLayerB ?: lockedLayerA ?: return
             if (lockedLayerB != null) lockedLayerB = null else lockedLayerA = null
             overlayBitmap = layer.bitmap
-            opacity = layer.opacity
             scaleF = layer.scale
             rotationDeg = layer.rotation
             offsetX = layer.offsetX
@@ -474,10 +505,10 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
             pendingPointSource = null
             pendingPointScreenPosition = null
             overlayFixedMode = false
+            repositionEnabled = true
             pointFixMode = false
             addOverlayPending = false
-            variantIndex = EffectVariant.Normal.ordinal
-            showTools = true
+            showTools = false
         }
 
         fun saveCurrentComposite() {
@@ -515,6 +546,7 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                             layers = layers,
                             frozen = frozen,
                             variant = variant,
+                            comparisonMix = opacity,
                             flipOverlayAndBackground = flipOverlayAndBackground,
                             frozenOverlayOpacity = frozenOverlayOpacity,
                             heatmapSimilarityThreshold = heatmapSimilarityThreshold,
@@ -562,13 +594,15 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                 .fillMaxSize()
                 .onGloballyPositioned { previewSize = it.size }
         ) {
-            val sceneZoom = if (pointFixMode) pointFixZoom else 1f
+            val sceneZoom = if (pointFixMode) pointFixZoom else viewportScale
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
                         scaleX = sceneZoom
                         scaleY = sceneZoom
+                        translationX = if (pointFixMode) 0f else viewportOffsetX
+                        translationY = if (pointFixMode) 0f else viewportOffsetY
                         transformOrigin = TransformOrigin.Center
                     }
             ) {
@@ -609,8 +643,10 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                 }
 
                 val gestureBorderColor = when (gestureOperation) {
-                    OverlayGestureOperation.Move -> MaterialTheme.colorScheme.primary
-                    OverlayGestureOperation.Transform -> MaterialTheme.colorScheme.tertiary
+                    OverlayGestureOperation.MoveOverlay,
+                    OverlayGestureOperation.PanView -> MaterialTheme.colorScheme.primary
+                    OverlayGestureOperation.TransformOverlay,
+                    OverlayGestureOperation.ZoomView -> MaterialTheme.colorScheme.tertiary
                     OverlayGestureOperation.Idle -> Color.Transparent
                 }
                 val canvasModifier = Modifier
@@ -623,9 +659,13 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                             else -> "Camera and background preview"
                         }
                         stateDescription = when {
-                            uiState.mode == OverlayUiMode.EditOverlay &&
+                            uiState.showComparisonControls &&
                                 gestureOperation != OverlayGestureOperation.Idle -> gestureOperation.instruction
-                            uiState.mode == OverlayUiMode.EditOverlay -> OverlayGestureOperation.Idle.instruction
+                            uiState.showComparisonControls -> if (repositionEnabled && !overlayFixedMode) {
+                                "Reposition enabled. One finger moves; two fingers resize and rotate."
+                            } else {
+                                "Position frozen. One finger pans; two fingers zoom."
+                            }
                             uiState.mode == OverlayUiMode.PointFix -> pointMatchUiState.title
                             uiState.mode == OverlayUiMode.FixedOverlay -> variant.label
                             else -> uiState.title
@@ -646,18 +686,41 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                             Modifier
                         },
                     )
-                    .overlayTransformGestures(
-                        enabled = uiState.mode == OverlayUiMode.EditOverlay &&
+                    .overlayCanvasGestures(
+                        enabled = uiState.showComparisonControls &&
                             busyLabel == null &&
-                            !showTools,
+                            !showTools &&
+                            !pointFixMode,
+                        repositionEnabled = repositionEnabled && !overlayFixedMode,
                         onOperationChange = { gestureOperation = it },
-                        onMove = { pan ->
-                            offsetX += pan.x
-                            offsetY += pan.y
+                        onOneFingerPan = { pan ->
+                            if (repositionEnabled && !overlayFixedMode) {
+                                offsetX += pan.x
+                                offsetY += pan.y
+                            } else {
+                                viewportOffsetX += pan.x
+                                viewportOffsetY += pan.y
+                            }
                         },
-                        onTransform = { zoom, rotation ->
-                            scaleF = (scaleF * zoom).coerceIn(minScale, maxScale)
-                            rotationDeg += rotation
+                        onTwoFingerTransform = { zoom, rotation, centroid ->
+                            if (repositionEnabled && !overlayFixedMode) {
+                                scaleF = (scaleF * zoom).coerceIn(minScale, maxScale)
+                                rotationDeg += rotation
+                            } else {
+                                val next = zoomViewportAround(
+                                    currentScale = viewportScale,
+                                    currentOffset = Offset(viewportOffsetX, viewportOffsetY),
+                                    zoom = zoom,
+                                    centroid = centroid,
+                                    viewportCenter = Offset(
+                                        previewSize.width / 2f,
+                                        previewSize.height / 2f,
+                                    ),
+                                )
+                                viewportScale = next.scale
+                                viewportOffsetX = next.offset.x
+                                viewportOffsetY = next.offset.y
+                            }
                         },
                     )
                     .then(
@@ -704,22 +767,43 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                 val clip = Rect(0f, 0f, size.width, size.height)
 
                 clipRect(clip.left, clip.top, clip.right, clip.bottom) {
-                    if (variant == EffectVariant.Heatmap) {
-                        heatmapImage?.let { drawImage(it) }
+                    if (variant.isGuidance) {
+                        guidanceImage?.let {
+                            drawImage(
+                                image = it,
+                                dstSize = IntSize(size.width.toInt(), size.height.toInt()),
+                                alpha = opacity.coerceIn(0f, 1f),
+                            )
+                        }
                     } else if (!hideAllOverlays) {
                         val invertOverlays = variant == EffectVariant.OverlayInverted
                         val drawSize = IntSize(size.width.toInt(), size.height.toInt())
 
                         if (lockedLayerA != null) {
-                            drawOverlayLayer(lockedLayerA!!, previewForDraw = drawSize, invert = invertOverlays)
+                            drawOverlayLayer(
+                                lockedLayerA!!,
+                                previewForDraw = drawSize,
+                                invert = invertOverlays,
+                                comparisonMix = opacity,
+                            )
                         }
                         if (lockedLayerB != null) {
-                            drawOverlayLayer(lockedLayerB!!, previewForDraw = drawSize, invert = invertOverlays)
+                            drawOverlayLayer(
+                                lockedLayerB!!,
+                                previewForDraw = drawSize,
+                                invert = invertOverlays,
+                                comparisonMix = opacity,
+                            )
                         }
 
                         val currentLayer = currentWorkingLayerOrNull()
                         if (currentLayer != null && (!overlayFixedMode || addOverlayPending)) {
-                            drawOverlayLayer(currentLayer, previewForDraw = drawSize, invert = invertOverlays)
+                            drawOverlayLayer(
+                                currentLayer,
+                                previewForDraw = drawSize,
+                                invert = invertOverlays,
+                                comparisonMix = opacity,
+                            )
                         }
                     }
 
@@ -765,6 +849,28 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
             }
 
             AnimatedVisibility(
+                visible = uiState.showComparisonControls && !showTools,
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 12.dp),
+            ) {
+                RepositionModeToggle(
+                    repositionEnabled = repositionEnabled && !overlayFixedMode,
+                    enabled = busyLabel == null,
+                    onToggle = {
+                        gestureOperation = OverlayGestureOperation.Idle
+                        if (overlayFixedMode) {
+                            reopenLatestOverlayForEditing()
+                            resetViewport()
+                        } else {
+                            repositionEnabled = !repositionEnabled
+                            if (repositionEnabled) resetViewport()
+                        }
+                    },
+                )
+            }
+
+            AnimatedVisibility(
                 visible = !showTools,
                 modifier = Modifier.align(Alignment.BottomCenter),
             ) {
@@ -772,20 +878,33 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                     modifier = Modifier.navigationBarsPadding(),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    OverlayControlDock(
-                        state = uiState,
-                        busyLabel = busyLabel,
-                        supportingText = pointMatchUiState.title.takeIf {
-                            uiState.mode == OverlayUiMode.PointFix
-                        },
-                        onRecommendedAction = { runRecommendedAction() },
-                        onOpenTools = { showTools = true },
-                    )
-                    if (uiState.showPersistentOpacityFader) {
-                        PersistentOpacityFader(
-                            opacity = opacity,
+                    if (uiState.showComparisonControls) {
+                        ComparisonControlBar(
+                            state = uiState,
+                            busyLabel = busyLabel,
+                            mix = opacity,
+                            variant = variant,
+                            availableVariants = variants.filter(EffectVariant::showInComparisonBar),
+                            summary = guidanceSummary,
+                            instruction = guidanceInstruction,
+                            analysisUpdating = guidanceUpdating,
                             enabled = busyLabel == null,
-                            onOpacityChange = { opacity = it },
+                            onMixChange = { opacity = it },
+                            onVariantChange = { selected ->
+                                variantIndex = variants.indexOf(selected)
+                            },
+                            onPrimaryAction = { runRecommendedAction() },
+                            onOpenTools = { showTools = true },
+                        )
+                    } else {
+                        OverlayControlDock(
+                            state = uiState,
+                            busyLabel = busyLabel,
+                            supportingText = pointMatchUiState.title.takeIf {
+                                uiState.mode == OverlayUiMode.PointFix
+                            },
+                            onRecommendedAction = { runRecommendedAction() },
+                            onOpenTools = { showTools = true },
                         )
                     }
                 }
@@ -806,6 +925,7 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                 ) {
                     WorkflowActionPanel(
                         state = uiState,
+                        repositionEnabled = repositionEnabled && !overlayFixedMode,
                         enabled = busyLabel == null,
                         onRecommendedAction = { runRecommendedAction() },
                         onEnableCamera = requestCameraAccess,
@@ -841,6 +961,7 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                                 resetWorkingOverlayTransform(clearPoints = true)
                                 hideAllOverlays = false
                             },
+                            onResetView = { resetViewport() },
                             onAutoAlign = {
                                 val bg = backgroundBitmap
                                 val ov = overlayBitmap
@@ -910,7 +1031,7 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                             variant = variant,
                             heatmapSimilarityThreshold = heatmapSimilarityThreshold,
                             heatmapPalette = heatmapPalette,
-                            drawingInstruction = heatmapInstruction.takeIf { variant == EffectVariant.Heatmap },
+                            drawingInstruction = guidanceInstruction.takeIf { variant.isGuidance },
                             canAddOverlay = lockedLayerB == null,
                             onToggleHide = { hideAllOverlays = !hideAllOverlays },
                             onAddOverlay = {
@@ -928,6 +1049,7 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                             onFrozenOverlayOpacityChange = { frozenOverlayOpacity = it },
                             onHeatmapSimilarityThresholdChange = { heatmapSimilarityThreshold = it },
                             onHeatmapPaletteChange = { heatmapPalette = it },
+                            onResetView = { resetViewport() },
                         )
                     }
                 }
@@ -1029,7 +1151,23 @@ private fun scaledCenterCropBitmap(source: Bitmap, width: Int, height: Int): Bit
     return scaled
 }
 
-private fun DrawScope.drawOverlayLayer(layer: OverlayLayer, previewForDraw: IntSize, invert: Boolean) {
+internal fun guidanceRenderSize(previewSize: IntSize, maxEdge: Int = 720): IntSize {
+    if (previewSize.width <= 0 || previewSize.height <= 0 || maxEdge <= 0) return IntSize(1, 1)
+    val longest = kotlin.math.max(previewSize.width, previewSize.height)
+    if (longest <= maxEdge) return previewSize
+    val scale = maxEdge.toFloat() / longest
+    return IntSize(
+        width = kotlin.math.max(1, (previewSize.width * scale).toInt()),
+        height = kotlin.math.max(1, (previewSize.height * scale).toInt()),
+    )
+}
+
+private fun DrawScope.drawOverlayLayer(
+    layer: OverlayLayer,
+    previewForDraw: IntSize,
+    invert: Boolean,
+    comparisonMix: Float,
+) {
     val matrix = buildOverlayMatrix(
         previewSize = previewForDraw,
         overlay = layer.bitmap,
@@ -1042,7 +1180,7 @@ private fun DrawScope.drawOverlayLayer(layer: OverlayLayer, previewForDraw: IntS
 
     drawIntoCanvas { canvas ->
         val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            alpha = (layer.opacity * 255).toInt().coerceIn(0, 255)
+            alpha = (layer.opacity * comparisonMix.coerceIn(0f, 1f) * 255).toInt().coerceIn(0, 255)
             isFilterBitmap = true
             if (invert) colorFilter = invertAndroidColorFilter()
         }
@@ -1058,6 +1196,7 @@ private suspend fun saveCompositeLayers(
     layers: List<OverlayLayer>,
     frozen: Bitmap,
     variant: EffectVariant,
+    comparisonMix: Float,
     flipOverlayAndBackground: Boolean,
     frozenOverlayOpacity: Float,
     heatmapSimilarityThreshold: Float,
@@ -1070,6 +1209,7 @@ private suspend fun saveCompositeLayers(
                 previewSize = previewSize,
                 layers = layers,
                 variant = variant,
+                comparisonMix = comparisonMix,
                 flipOverlayAndBackground = flipOverlayAndBackground,
                 frozenOverlayOpacity = frozenOverlayOpacity,
                 heatmapSimilarityThreshold = heatmapSimilarityThreshold,
@@ -1248,6 +1388,7 @@ private fun composeLayers(
     previewSize: IntSize,
     layers: List<OverlayLayer>,
     variant: EffectVariant,
+    comparisonMix: Float,
     flipOverlayAndBackground: Boolean,
     frozenOverlayOpacity: Float,
     heatmapSimilarityThreshold: Float,
@@ -1269,18 +1410,25 @@ private fun composeLayers(
         if (variant == EffectVariant.BackgroundInverted) colorFilter = invertAndroidColorFilter()
     }
 
-    if (!flipOverlayAndBackground && variant != EffectVariant.Heatmap) {
+    if (!flipOverlayAndBackground) {
         canvas.drawBitmap(renderedBackground, 0f, 0f, basePaint)
     }
 
-    if (variant == EffectVariant.Heatmap) {
-        val heatmap = buildHeatmapRender(
+    if (variant.isGuidance) {
+        val guideSize = guidanceRenderSize(
+            IntSize(renderedBackground.width, renderedBackground.height),
+            maxEdge = 1440,
+        )
+        val guideSx = guideSize.width.toFloat() / previewSize.width
+        val guideSy = guideSize.height.toFloat() / previewSize.height
+        val guidance = buildGuidanceRender(
             background = renderedBackground,
-            outputWidth = renderedBackground.width,
-            outputHeight = renderedBackground.height,
+            outputWidth = guideSize.width,
+            outputHeight = guideSize.height,
             layers = layers,
             similarityThreshold = heatmapSimilarityThreshold,
             palette = heatmapPalette,
+            visualization = variant.guidanceVisualization!!,
             matrixForLayer = { layer ->
                 buildOverlayMatrix(
                     previewSize = previewSize,
@@ -1290,14 +1438,27 @@ private fun composeLayers(
                     offsetX = layer.offsetX,
                     offsetY = layer.offsetY,
                     fixedPoints = layer.fixedPoints,
-                    sx = sx,
-                    sy = sy
+                    sx = guideSx,
+                    sy = guideSy
                 )
             }
         )
-        if (heatmap != null) {
-            canvas.drawBitmap(heatmap.bitmap, 0f, 0f, null)
-            heatmap.bitmap.recycle()
+        if (guidance != null) {
+            canvas.drawBitmap(
+                guidance.bitmap,
+                null,
+                android.graphics.Rect(
+                    0,
+                    0,
+                    renderedBackground.width,
+                    renderedBackground.height,
+                ),
+                Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    alpha = (comparisonMix.coerceIn(0f, 1f) * 255).toInt()
+                    isFilterBitmap = true
+                },
+            )
+            guidance.bitmap.recycle()
         }
     }
 
@@ -1306,7 +1467,7 @@ private fun composeLayers(
         isFilterBitmap = true
     }
 
-    if (variant != EffectVariant.Heatmap) {
+    if (!variant.isGuidance) {
         layers.forEach { layer ->
             val m = buildOverlayMatrix(
                 previewSize = previewSize,
@@ -1319,7 +1480,8 @@ private fun composeLayers(
                 sx = sx,
                 sy = sy
             )
-            invertOverlayPaint.alpha = (layer.opacity * 255).toInt().coerceIn(0, 255)
+            invertOverlayPaint.alpha =
+                (layer.opacity * comparisonMix.coerceIn(0f, 1f) * 255).toInt().coerceIn(0, 255)
             canvas.drawBitmap(layer.bitmap, m, invertOverlayPaint)
         }
     }
@@ -1391,54 +1553,63 @@ private fun applyPointLock(baseMatrix: Matrix, fixedPoints: List<FixedPointLock>
     return out
 }
 
-private data class HeatmapRender(
+private data class GuidanceRender(
     val bitmap: Bitmap,
+    val summary: OverlayDiffSummary,
     val instruction: DrawingInstruction,
 )
 
-private fun buildHeatmapRender(
+private fun buildGuidanceRender(
     background: Bitmap,
     outputWidth: Int,
     outputHeight: Int,
     layers: List<OverlayLayer>,
     similarityThreshold: Float,
     palette: HeatmapPalette,
+    visualization: GuidanceVisualization,
     matrixForLayer: (OverlayLayer) -> Matrix
-): HeatmapRender? {
+): GuidanceRender? {
     if (layers.isEmpty()) return null
     if (outputWidth <= 0 || outputHeight <= 0) return null
 
     val bg = scaledCenterCropBitmap(background, outputWidth, outputHeight)
-
     val overlayComposite = Bitmap.createBitmap(outputWidth, outputHeight, Bitmap.Config.ARGB_8888)
-    val overlayCanvas = Canvas(overlayComposite)
-    layers.forEach { layer ->
-        val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            alpha = (layer.opacity * 255).toInt().coerceIn(0, 255)
-            isFilterBitmap = true
+    try {
+        val overlayCanvas = Canvas(overlayComposite)
+        layers.forEach { layer ->
+            val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                alpha = 255
+                isFilterBitmap = true
+            }
+            overlayCanvas.drawBitmap(layer.bitmap, matrixForLayer(layer), p)
         }
-        overlayCanvas.drawBitmap(layer.bitmap, matrixForLayer(layer), p)
+
+        val bgPixels = IntArray(outputWidth * outputHeight)
+        val ovPixels = IntArray(outputWidth * outputHeight)
+        bg.getPixels(bgPixels, 0, outputWidth, 0, 0, outputWidth, outputHeight)
+        overlayComposite.getPixels(ovPixels, 0, outputWidth, 0, 0, outputWidth, outputHeight)
+
+        val analysis = analyzeOverlayDiff(
+            backgroundPixels = bgPixels,
+            overlayPixels = ovPixels,
+            width = outputWidth,
+            height = outputHeight,
+            similarityThreshold = similarityThreshold,
+            palette = palette,
+            visualization = visualization,
+        )
+
+        val out = Bitmap.createBitmap(outputWidth, outputHeight, Bitmap.Config.ARGB_8888)
+        out.setPixels(analysis.guidancePixels, 0, outputWidth, 0, 0, outputWidth, outputHeight)
+        return GuidanceRender(
+            bitmap = out,
+            summary = analysis.summary,
+            instruction = analysis.instruction,
+        )
+    } finally {
+        if (!overlayComposite.isRecycled) overlayComposite.recycle()
+        if (bg !== background && !bg.isRecycled) bg.recycle()
     }
-
-    val bgPixels = IntArray(outputWidth * outputHeight)
-    val ovPixels = IntArray(outputWidth * outputHeight)
-    bg.getPixels(bgPixels, 0, outputWidth, 0, 0, outputWidth, outputHeight)
-    overlayComposite.getPixels(ovPixels, 0, outputWidth, 0, 0, outputWidth, outputHeight)
-
-    val analysis = analyzeOverlayDiff(
-        backgroundPixels = bgPixels,
-        overlayPixels = ovPixels,
-        width = outputWidth,
-        height = outputHeight,
-        similarityThreshold = similarityThreshold,
-        palette = palette,
-    )
-
-    val out = Bitmap.createBitmap(outputWidth, outputHeight, Bitmap.Config.ARGB_8888)
-    out.setPixels(analysis.heatmapPixels, 0, outputWidth, 0, 0, outputWidth, outputHeight)
-    overlayComposite.recycle()
-    if (bg !== background) bg.recycle()
-    return HeatmapRender(bitmap = out, instruction = analysis.instruction)
 }
 
 private fun invertAndroidColorFilter(): ColorMatrixColorFilter {

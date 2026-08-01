@@ -72,4 +72,20 @@ class ImageGeometryTest {
         assertFalse(isPixelInside(width = 100, height = 50, x = 100f, y = 20f))
         assertFalse(isPixelInside(width = 100, height = 50, x = 20f, y = 50f))
     }
+
+    @Test
+    fun guidanceRenderingPreservesAspectRatioWithinItsPerformanceBudget() {
+        assertEquals(
+            androidx.compose.ui.unit.IntSize(720, 360),
+            guidanceRenderSize(androidx.compose.ui.unit.IntSize(1440, 720)),
+        )
+        assertEquals(
+            androidx.compose.ui.unit.IntSize(360, 720),
+            guidanceRenderSize(androidx.compose.ui.unit.IntSize(720, 1440)),
+        )
+        assertEquals(
+            androidx.compose.ui.unit.IntSize(640, 480),
+            guidanceRenderSize(androidx.compose.ui.unit.IntSize(640, 480)),
+        )
+    }
 }

@@ -2,16 +2,16 @@ schema_version: 1
 release:
   unit: overlay-cam
   date: 2026-08-01
-  base_revision: 8e4e3ef0c4ecb4d12898ac181b055de2a34bbbf3
-  release_revision: "resolved by refs/tags/v0.2.0"
+  base_revision: 3a2381e456941b9b6cdd069a6d1d24380c41cb9e
+  release_revision: "resolved by refs/tags/v0.3.0"
   version_before:
-    version_code: 2
-    version_name: "0.1.1"
-  version_after:
     version_code: 3
     version_name: "0.2.0"
+  version_after:
+    version_code: 4
+    version_name: "0.3.0"
   tag:
-    name: v0.2.0
+    name: v0.3.0
     kind: annotated
     created: true
   publish_state: not_requested
@@ -20,52 +20,78 @@ release:
 metadata:
   changelog: CHANGELOG.md
   version_source: app/build.gradle.kts
+  design_spec: docs/comparison-workspace-0.3.0.md
   release_metadata_changed:
     - app/build.gradle.kts
     - CHANGELOG.md
-    - docs/interaction-feedback-0.2.0.md
+    - docs/comparison-workspace-0.3.0.md
 
 features:
-  touch_operations:
-    one_pointer: move_only
-    two_or_more_pointers: resize_and_rotate_only
-    transition_baseline_reset: true
-  visual_feedback:
-    move: primary_border_and_labeled_badge
-    resize_rotate: tertiary_border_and_labeled_badge
-  opacity_control:
-    location: persistent_bottom_fader
-    visible_during: EditOverlay
-    duplicate_tools_slider_removed: true
+  comparison_workspace:
+    persistent_blend_fader: true
+    quick_modes:
+      - overlay
+      - similarity
+      - value_difference
+      - contours
+    metrics:
+      - threshold_accuracy
+      - average_similarity
+      - contour_overlap
+  transform_modes:
+    reposition:
+      one_pointer: move_overlay
+      two_or_more_pointers: resize_and_rotate_overlay
+    frozen_inspection:
+      one_pointer: pan_viewport
+      two_or_more_pointers: centroid_zoom_viewport
+    floating_toggle: true
+    gesture_transition_baseline_reset: true
+  guidance:
+    transparent_outside_reference: true
+    practical_instruction_copy: true
+    artistic_quality_disclaimer: true
+    live_max_edge_pixels: 720
+    live_debounce_ms: 120
+    export_max_edge_pixels: 1440
+  responsive_ui:
+    combined_bottom_surface: true
+    narrow_header_breakpoint_dp: 420
+    navigation_insets: respected
 
 verification:
   - command: make test
     result: passed
-    detail: Docker-backed testDebugUnitTest; 32 tests, 0 failures, 0 errors, 0 skipped
+    detail: Docker-backed testDebugUnitTest; 36 tests, 0 failures, 0 errors, 0 skipped
   - command: docker run --rm -v "$PWD":/work -v "$HOME/.gradle":/.gradle -w /work overlay-cam:android bash -lc "bash ./scripts/gradle-in-docker.sh lintDebug"
     result: passed
     detail: 0 errors; 11 non-blocking dependency-update warnings
   - command: make build
     result: passed
     detail: Docker-backed assembleDebug
-  - command: aapt dump badging release/overlay-cam-0.2.0-debug.apk
+  - command: aapt dump badging release/overlay-cam-0.3.0-debug.apk
     result: passed
-    detail: package com.example.overlaycam, versionCode 3, versionName 0.2.0, minSdk 24, targetSdk 34
+    detail: package com.example.overlaycam, versionCode 4, versionName 0.3.0, minSdk 24, targetSdk 34
 
 artifacts:
-  - path: release/overlay-cam-0.2.0-debug.apk
+  - path: release/overlay-cam-0.3.0-debug.apk
     kind: debug_apk
-    size_bytes: 14736885
-    sha256: a489133566b0bcb862d2e0a001a2ec873cb0ece8fb486b3d7625ef63fcc4782c
+    size_bytes: 14769653
+    sha256: d45027c9d02de3bd74dcaec824e1e2ceb5a33148fccd1d3ac11fc55813e0bdb1
 
 omitted_checks:
-  - physical-device one-finger drag feel and latency
-  - physical-device two-finger pinch and rotation feel
+  - physical-device one-finger overlay positioning feel
+  - physical-device two-finger resize and rotation feel
+  - physical-device frozen viewport pan and centroid zoom
   - second-finger add/remove transition under real touch input
+  - guide readability over varied drawings and lighting
   - TalkBack traversal and large-font rendering
   - compact-height landscape layout
-  - gesture-navigation and three-button-navigation fader clearance
+  - left-handed floating-toggle reachability
+  - gesture-navigation and three-button-navigation clearance
 
 known_warnings:
+  - Accuracy and similarity metrics compare rendered pixels and are not objective measures of drawing quality.
+  - Contour guidance uses a lightweight local-gradient detector and may respond to texture or lighting edges.
   - Android lint reports newer dependency versions; dependency upgrades were intentionally excluded from this feature release.
   - The delivered APK is debug-signed and intended for direct testing, not store publication.

@@ -24,6 +24,7 @@ data class OverlayUiState(
     val hasOverlay: Boolean = false,
     val isOverlayFixed: Boolean = false,
     val isPointFixMode: Boolean = false,
+    val isRepositionEnabled: Boolean = true,
 ) {
     val mode: OverlayUiMode = when {
         !hasStillBackground -> OverlayUiMode.Setup
@@ -44,9 +45,9 @@ data class OverlayUiState(
     val title: String = when (mode) {
         OverlayUiMode.Setup -> if (cameraAvailable) "Live camera" else "Photo mode"
         OverlayUiMode.BackgroundReady -> "Background ready"
-        OverlayUiMode.EditOverlay -> "Adjust overlay"
+        OverlayUiMode.EditOverlay -> if (isRepositionEnabled) "Position overlay" else "Inspect alignment"
         OverlayUiMode.PointFix -> "Match points"
-        OverlayUiMode.FixedOverlay -> "Ready to save"
+        OverlayUiMode.FixedOverlay -> "Review comparison"
     }
 
     val guidance: String = when (mode) {
@@ -58,9 +59,13 @@ data class OverlayUiState(
             "Choose a background photo to start. Camera access remains optional and can be enabled from Options."
         }
         OverlayUiMode.BackgroundReady -> "Add the image you want to compare or trace over the frozen background."
-        OverlayUiMode.EditOverlay -> "Use one finger to move. Use two fingers to resize and rotate. The active operation is shown while you touch the overlay."
+        OverlayUiMode.EditOverlay -> if (isRepositionEnabled) {
+            "Position the reference with one finger to move and two fingers to resize or rotate. Freeze it when alignment is ready."
+        } else {
+            "Position is frozen. Use one finger to pan and two fingers to zoom while checking values, similarity, and contours."
+        }
         OverlayUiMode.PointFix -> "For each pair, tap a landmark on the overlay first, then tap where it belongs on the background."
-        OverlayUiMode.FixedOverlay -> "Save the composite, or reopen the overlay to make another adjustment."
+        OverlayUiMode.FixedOverlay -> "Position is frozen. Pan, zoom, and switch guides without disturbing alignment; reposition at any time."
     }
 
     val recommendedAction: OverlayRecommendedAction = when (mode) {
@@ -79,7 +84,7 @@ data class OverlayUiState(
         OverlayRecommendedAction.FreezeFrame -> "Freeze frame"
         OverlayRecommendedAction.PickBackground -> "Choose background photo"
         OverlayRecommendedAction.PickOverlay -> "Add overlay image"
-        OverlayRecommendedAction.FinishAdjusting -> "Done adjusting"
+        OverlayRecommendedAction.FinishAdjusting -> "Use this position"
         OverlayRecommendedAction.FinishPointFix -> "Finish matching"
         OverlayRecommendedAction.SaveImage -> "Save image"
     }
@@ -91,20 +96,24 @@ data class OverlayUiState(
             "Choose a photo to use as the background."
         }
         OverlayUiMode.BackgroundReady -> "Choose an overlay image to begin adjusting it."
-        OverlayUiMode.EditOverlay -> "One finger moves; two fingers resize and rotate."
+        OverlayUiMode.EditOverlay -> if (isRepositionEnabled) {
+            "Move with one finger; resize and rotate with two."
+        } else {
+            "Frozen: pan with one finger and zoom with two."
+        }
         OverlayUiMode.PointFix -> "Finish when the matching points are placed correctly."
-        OverlayUiMode.FixedOverlay -> "Save the finished image to your gallery."
+        OverlayUiMode.FixedOverlay -> "Inspect the guides, then save or reposition."
     }
 
     val expandActionLabel: String = when (mode) {
         OverlayUiMode.Setup,
         OverlayUiMode.BackgroundReady -> "Options"
-        OverlayUiMode.EditOverlay -> "Fine tune"
+        OverlayUiMode.EditOverlay -> "Tools"
         OverlayUiMode.PointFix -> "Point tools"
         OverlayUiMode.FixedOverlay -> "More actions"
     }
 
-    val showPersistentOpacityFader: Boolean = mode == OverlayUiMode.EditOverlay
+    val showComparisonControls: Boolean = mode == OverlayUiMode.EditOverlay || mode == OverlayUiMode.FixedOverlay
     val showGestureHint: Boolean = mode == OverlayUiMode.EditOverlay
     val showPointFixPanel: Boolean = mode == OverlayUiMode.PointFix
     val showEditPanel: Boolean = mode == OverlayUiMode.EditOverlay

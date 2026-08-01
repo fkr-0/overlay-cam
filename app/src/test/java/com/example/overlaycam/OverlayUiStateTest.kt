@@ -27,13 +27,13 @@ class OverlayUiStateTest {
         assertEquals("Background ready", backgroundReady.title)
 
         assertEquals(OverlayRecommendedAction.FinishAdjusting, editing.recommendedAction)
-        assertEquals("Done adjusting", editing.recommendedActionLabel)
-        assertEquals("Adjust overlay", editing.title)
+        assertEquals("Use this position", editing.recommendedActionLabel)
+        assertEquals("Position overlay", editing.title)
         assertTrue(editing.showGestureHint)
 
         assertEquals(OverlayRecommendedAction.SaveImage, fixed.recommendedAction)
         assertEquals("Save image", fixed.recommendedActionLabel)
-        assertEquals("Ready to save", fixed.title)
+        assertEquals("Review comparison", fixed.title)
     }
 
     @Test
@@ -79,8 +79,8 @@ class OverlayUiStateTest {
         }
         assertTrue(states[0].recommendedActionHint.contains("still"))
         assertTrue(states[1].recommendedActionHint.contains("overlay"))
-        assertTrue(states[2].recommendedActionHint.contains("One finger"))
-        assertTrue(states[3].recommendedActionHint.contains("Save"))
+        assertTrue(states[2].recommendedActionHint.contains("one finger"))
+        assertTrue(states[3].recommendedActionHint.contains("save"))
     }
 
     @Test
@@ -88,7 +88,7 @@ class OverlayUiStateTest {
         assertEquals("Options", OverlayUiState(hasStillBackground = false).expandActionLabel)
         assertEquals("Options", OverlayUiState(hasStillBackground = true).expandActionLabel)
         assertEquals(
-            "Fine tune",
+            "Tools",
             OverlayUiState(hasStillBackground = true, hasOverlay = true).expandActionLabel,
         )
         assertEquals(
@@ -110,7 +110,7 @@ class OverlayUiStateTest {
     }
 
     @Test
-    fun editingKeepsTheOpacityFaderPermanentlyVisible() {
+    fun editAndReviewKeepComparisonControlsVisible() {
         val editing = OverlayUiState(hasStillBackground = true, hasOverlay = true)
         val fixed = OverlayUiState(
             hasStillBackground = true,
@@ -118,8 +118,21 @@ class OverlayUiStateTest {
             isOverlayFixed = true,
         )
 
-        assertTrue(editing.showPersistentOpacityFader)
-        assertFalse(fixed.showPersistentOpacityFader)
+        assertTrue(editing.showComparisonControls)
+        assertTrue(fixed.showComparisonControls)
+    }
+
+    @Test
+    fun frozenEditModeExplainsInspectionGestures() {
+        val inspecting = OverlayUiState(
+            hasStillBackground = true,
+            hasOverlay = true,
+            isRepositionEnabled = false,
+        )
+
+        assertEquals("Inspect alignment", inspecting.title)
+        assertTrue(inspecting.guidance.contains("one finger to pan"))
+        assertTrue(inspecting.guidance.contains("two fingers to zoom"))
     }
 
     @Test

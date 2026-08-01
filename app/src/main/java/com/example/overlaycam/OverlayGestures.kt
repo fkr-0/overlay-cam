@@ -5,6 +5,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateRotation
 import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.PointerInputScope
@@ -17,59 +18,101 @@ internal enum class OverlayGestureOperation(
 ) {
     Idle(
         label = "Overlay ready",
-        instruction = "Use one finger to move, or two fingers to resize and rotate.",
+        instruction = "Touch the canvas to manipulate the overlay or inspect details.",
         symbol = "",
     ),
-    Move(
-        label = "Move",
+    MoveOverlay(
+        label = "Move overlay",
         instruction = "One finger moves the overlay.",
         symbol = "↕  ↔",
     ),
-    Transform(
-        label = "Resize + rotate",
+    TransformOverlay(
+        label = "Resize + rotate overlay",
         instruction = "Two fingers resize and rotate the overlay.",
         symbol = "↻  ◉—◉",
     ),
+    PanView(
+        label = "Pan drawing",
+        instruction = "One finger pans the frozen comparison.",
+        symbol = "HAND  ↔",
+    ),
+    ZoomView(
+        label = "Zoom drawing",
+        instruction = "Two fingers zoom the frozen comparison.",
+        symbol = "◉  ↔  ◉",
+    ),
 }
 
-internal fun gestureOperationForPointerCount(pointerCount: Int): OverlayGestureOperation = when {
+internal fun gestureOperationForPointerCount(
+    pointerCount: Int,
+    repositionEnabled: Boolean,
+): OverlayGestureOperation = when {
     pointerCount <= 0 -> OverlayGestureOperation.Idle
-    pointerCount == 1 -> OverlayGestureOperation.Move
-    else -> OverlayGestureOperation.Transform
+    pointerCount == 1 && repositionEnabled -> OverlayGestureOperation.MoveOverlay
+    pointerCount >= 2 && repositionEnabled -> OverlayGestureOperation.TransformOverlay
+    pointerCount == 1 -> OverlayGestureOperation.PanView
+    else -> OverlayGestureOperation.ZoomView
 }
 
-internal fun Modifier.overlayTransformGestures(
+internal data class ViewportTransform(
+    val scale: Float,
+    val offset: Offset,
+)
+
+internal fun zoomViewportAround(
+    currentScale: Float,
+    currentOffset: Offset,
+    zoom: Float,
+    centroid: Offset,
+    viewportCenter: Offset,
+    minScale: Float = 1f,
+    maxScale: Float = 6f,
+): ViewportTransform {
+    val nextScale = (currentScale * zoom).coerceIn(minScale, maxScale)
+    if (currentScale <= 0f || nextScale == currentScale) {
+        return ViewportTransform(nextScale, currentOffset)
+    }
+    val ratio = nextScale / currentScale
+    val relativeCentroid = centroid - viewportCenter
+    val nextOffset = relativeCentroid * (1f - ratio) + currentOffset * ratio
+    return ViewportTransform(nextScale, nextOffset)
+}
+
+internal fun Modifier.overlayCanvasGestures(
     enabled: Boolean,
+    repositionEnabled: Boolean,
     onOperationChange: (OverlayGestureOperation) -> Unit,
-    onMove: (Offset) -> Unit,
-    onTransform: (zoom: Float, rotationDegrees: Float) -> Unit,
+    onOneFingerPan: (Offset) -> Unit,
+    onTwoFingerTransform: (zoom: Float, rotationDegrees: Float, centroid: Offset) -> Unit,
 ): Modifier {
     if (!enabled) return this
 
-    return pointerInput(enabled) {
-        detectOverlayTransformGestures(
+    return pointerInput(enabled, repositionEnabled) {
+        detectOverlayCanvasGestures(
+            repositionEnabled = repositionEnabled,
             onOperationChange = onOperationChange,
-            onMove = onMove,
-            onTransform = onTransform,
+            onOneFingerPan = onOneFingerPan,
+            onTwoFingerTransform = onTwoFingerTransform,
         )
     }
 }
 
-private suspend fun PointerInputScope.detectOverlayTransformGestures(
+private suspend fun PointerInputScope.detectOverlayCanvasGestures(
+    repositionEnabled: Boolean,
     onOperationChange: (OverlayGestureOperation) -> Unit,
-    onMove: (Offset) -> Unit,
-    onTransform: (zoom: Float, rotationDegrees: Float) -> Unit,
+    onOneFingerPan: (Offset) -> Unit,
+    onTwoFingerTransform: (zoom: Float, rotationDegrees: Float, centroid: Offset) -> Unit,
 ) {
     awaitEachGesture {
         awaitFirstDown(requireUnconsumed = false)
-        var operation = OverlayGestureOperation.Move
+        var operation = gestureOperationForPointerCount(1, repositionEnabled)
         onOperationChange(operation)
 
         try {
             while (true) {
                 val event = awaitPointerEvent()
                 val pointerCount = event.changes.count { it.pressed }
-                val nextOperation = gestureOperationForPointerCount(pointerCount)
+                val nextOperation = gestureOperationForPointerCount(pointerCount, repositionEnabled)
                 val operationChanged = nextOperation != operation
 
                 if (operationChanged) {
@@ -82,15 +125,21 @@ private suspend fun PointerInputScope.detectOverlayTransformGestures(
                 if (!operationChanged) {
                     when (operation) {
                         OverlayGestureOperation.Idle -> Unit
-                        OverlayGestureOperation.Move -> {
+                        OverlayGestureOperation.MoveOverlay,
+                        OverlayGestureOperation.PanView -> {
                             val pan = event.calculatePan()
-                            if (pan != Offset.Zero) onMove(pan)
+                            if (pan != Offset.Zero) onOneFingerPan(pan)
                         }
-                        OverlayGestureOperation.Transform -> {
+                        OverlayGestureOperation.TransformOverlay,
+                        OverlayGestureOperation.ZoomView -> {
                             val zoom = event.calculateZoom()
                             val rotation = event.calculateRotation()
                             if (zoom != 1f || rotation != 0f) {
-                                onTransform(zoom, rotation)
+                                onTwoFingerTransform(
+                                    zoom,
+                                    rotation,
+                                    event.calculateCentroid(useCurrent = true),
+                                )
                             }
                         }
                     }

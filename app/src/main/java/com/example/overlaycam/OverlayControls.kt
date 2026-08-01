@@ -1,6 +1,7 @@
 package com.example.overlaycam
 
 import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -36,6 +37,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import java.util.Locale
@@ -50,6 +54,7 @@ internal fun OverlayControlDock(
     onOpenTools: () -> Unit,
 ) {
     val isBusy = busyLabel != null
+    val compact = state.mode == OverlayUiMode.EditOverlay || state.mode == OverlayUiMode.FixedOverlay
     Surface(
         modifier = modifier
             .widthIn(max = 720.dp)
@@ -62,7 +67,7 @@ internal fun OverlayControlDock(
         shadowElevation = 12.dp,
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = if (compact) 8.dp else 12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Row(
@@ -73,21 +78,37 @@ internal fun OverlayControlDock(
                 StagePill(state.stageLabel)
                 Column(modifier = Modifier.weight(1f)) {
                     Text(state.title, style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        text = busyLabel ?: supportingText ?: state.recommendedActionHint,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    if (!compact || isBusy) {
+                        Text(
+                            text = busyLabel ?: supportingText ?: state.recommendedActionHint,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
-                TextButton(
-                    enabled = !isBusy,
-                    onClick = onOpenTools,
-                ) {
-                    Text(state.expandActionLabel)
+                if (compact) {
+                    Button(enabled = !isBusy, onClick = onRecommendedAction) {
+                        Text(state.recommendedActionLabel)
+                    }
+                } else {
+                    TextButton(
+                        enabled = !isBusy,
+                        onClick = onOpenTools,
+                    ) {
+                        Text(state.expandActionLabel)
+                    }
                 }
             }
 
-            Row(
+            if (compact) {
+                TextButton(
+                    enabled = !isBusy,
+                    onClick = onOpenTools,
+                    modifier = Modifier.align(Alignment.End),
+                ) {
+                    Text(state.expandActionLabel)
+                }
+            } else Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -115,12 +136,23 @@ internal fun OverlayControlDock(
 }
 
 @Composable
-internal fun PersistentOpacityFader(
+internal fun ComparisonControlBar(
     modifier: Modifier = Modifier,
-    opacity: Float,
+    state: OverlayUiState,
+    busyLabel: String?,
+    mix: Float,
+    variant: EffectVariant,
+    availableVariants: List<EffectVariant>,
+    summary: OverlayDiffSummary?,
+    instruction: DrawingInstruction?,
+    analysisUpdating: Boolean,
     enabled: Boolean,
-    onOpacityChange: (Float) -> Unit,
+    onMixChange: (Float) -> Unit,
+    onVariantChange: (EffectVariant) -> Unit,
+    onPrimaryAction: () -> Unit,
+    onOpenTools: () -> Unit,
 ) {
+    val narrowHeader = LocalConfiguration.current.screenWidthDp < 420
     Surface(
         modifier = modifier
             .widthIn(max = 720.dp)
@@ -133,29 +165,204 @@ internal fun PersistentOpacityFader(
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                StagePill(state.stageLabel)
+                Text(
+                    text = state.title,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                if (!narrowHeader) {
+                    TextButton(enabled = enabled, onClick = onOpenTools) {
+                        Text(state.expandActionLabel)
+                    }
+                    Button(enabled = enabled, onClick = onPrimaryAction) {
+                        if (busyLabel != null) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                            )
+                        } else {
+                            Text(state.recommendedActionLabel)
+                        }
+                    }
+                }
+            }
+            if (narrowHeader) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TextButton(enabled = enabled, onClick = onOpenTools) {
+                        Text(state.expandActionLabel)
+                    }
+                    Button(enabled = enabled, onClick = onPrimaryAction) {
+                        if (busyLabel != null) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                            )
+                        } else {
+                            Text(state.recommendedActionLabel)
+                        }
+                    }
+                }
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("Overlay opacity", style = MaterialTheme.typography.labelLarge)
+                Column {
+                    Text("Compare", style = MaterialTheme.typography.labelLarge)
+                    Text(
+                        "Drawing ↔ ${variant.label}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 Text(
-                    String.format(Locale.getDefault(), "%.0f%%", opacity * 100f),
+                    String.format(Locale.getDefault(), "%.0f%%", mix * 100f),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             Slider(
                 modifier = Modifier.semantics {
-                    contentDescription = "Overlay opacity, permanently available"
+                    contentDescription = "Shift continuously between drawing and ${variant.label}"
                 },
                 enabled = enabled,
-                value = opacity,
-                onValueChange = { onOpacityChange(it.coerceIn(0f, 1f)) },
+                value = mix,
+                onValueChange = { onMixChange(it.coerceIn(0f, 1f)) },
                 valueRange = 0f..1f,
             )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text("Drawing", style = MaterialTheme.typography.labelSmall)
+                Text(variant.shortLabel, style = MaterialTheme.typography.labelSmall)
+            }
+            ActionFlow {
+                availableVariants.forEach { option ->
+                    FilterChip(
+                        selected = variant == option,
+                        enabled = enabled,
+                        onClick = { onVariantChange(option) },
+                        label = { Text(option.shortLabel) },
+                    )
+                }
+            }
+
+            if (variant.isGuidance) {
+                if (summary != null) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        ComparisonMetric(
+                            modifier = Modifier.weight(1f),
+                            label = "Accuracy",
+                            value = String.format(Locale.getDefault(), "%.0f%%", summary.matchRatio * 100f),
+                        )
+                        ComparisonMetric(
+                            modifier = Modifier.weight(1f),
+                            label = "Similarity",
+                            value = String.format(Locale.getDefault(), "%.0f%%", summary.averageSimilarity * 100f),
+                        )
+                        ComparisonMetric(
+                            modifier = Modifier.weight(1f),
+                            label = "Contours",
+                            value = if (summary.edgeComparedPixels == 0) "—" else
+                                String.format(Locale.getDefault(), "%.0f%%", summary.edgeMatchRatio * 100f),
+                        )
+                    }
+                }
+                Text(
+                    text = when {
+                        analysisUpdating -> "Updating guide…"
+                        instruction != null -> instruction.title
+                        else -> "Guide unavailable"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (!analysisUpdating && instruction != null) {
+                    Text(
+                        text = instruction.detail,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ComparisonMetric(
+    modifier: Modifier = Modifier,
+    label: String,
+    value: String,
+) {
+    Surface(
+        modifier = modifier,
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(value, style = MaterialTheme.typography.titleSmall)
+            Text(label, style = MaterialTheme.typography.labelSmall)
+        }
+    }
+}
+
+@Composable
+internal fun RepositionModeToggle(
+    modifier: Modifier = Modifier,
+    repositionEnabled: Boolean,
+    enabled: Boolean,
+    onToggle: () -> Unit,
+) {
+    val title = if (repositionEnabled) "Position unlocked" else "Position frozen"
+    val action = if (repositionEnabled) "Freeze" else "Reposition"
+    Surface(
+        modifier = modifier
+            .semantics {
+                role = Role.Button
+                stateDescription = title
+            }
+            .clickable(enabled = enabled, role = Role.Button, onClick = onToggle),
+        shape = MaterialTheme.shapes.extraLarge,
+        color = if (repositionEnabled) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerHigh
+        },
+        contentColor = if (repositionEnabled) {
+            MaterialTheme.colorScheme.onPrimaryContainer
+        } else {
+            MaterialTheme.colorScheme.onSurface
+        },
+        tonalElevation = 8.dp,
+        shadowElevation = 10.dp,
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(title, style = MaterialTheme.typography.labelLarge)
+            Text(action, style = MaterialTheme.typography.labelSmall)
         }
     }
 }
@@ -168,13 +375,17 @@ internal fun GestureOperationFeedback(
     if (operation == OverlayGestureOperation.Idle) return
 
     val containerColor = when (operation) {
-        OverlayGestureOperation.Move -> MaterialTheme.colorScheme.primaryContainer
-        OverlayGestureOperation.Transform -> MaterialTheme.colorScheme.tertiaryContainer
+        OverlayGestureOperation.MoveOverlay,
+        OverlayGestureOperation.PanView -> MaterialTheme.colorScheme.primaryContainer
+        OverlayGestureOperation.TransformOverlay,
+        OverlayGestureOperation.ZoomView -> MaterialTheme.colorScheme.tertiaryContainer
         OverlayGestureOperation.Idle -> MaterialTheme.colorScheme.surface
     }
     val contentColor = when (operation) {
-        OverlayGestureOperation.Move -> MaterialTheme.colorScheme.onPrimaryContainer
-        OverlayGestureOperation.Transform -> MaterialTheme.colorScheme.onTertiaryContainer
+        OverlayGestureOperation.MoveOverlay,
+        OverlayGestureOperation.PanView -> MaterialTheme.colorScheme.onPrimaryContainer
+        OverlayGestureOperation.TransformOverlay,
+        OverlayGestureOperation.ZoomView -> MaterialTheme.colorScheme.onTertiaryContainer
         OverlayGestureOperation.Idle -> MaterialTheme.colorScheme.onSurface
     }
 
@@ -270,6 +481,7 @@ private fun StagePill(label: String) {
 @Composable
 internal fun WorkflowActionPanel(
     state: OverlayUiState,
+    repositionEnabled: Boolean,
     enabled: Boolean,
     onRecommendedAction: () -> Unit,
     onEnableCamera: () -> Unit,
@@ -295,8 +507,12 @@ internal fun WorkflowActionPanel(
 
     if (state.showGestureHint) {
         WorkflowCallout(
-            label = "Direct manipulation",
-            text = "One finger moves the overlay. Two fingers resize and rotate it. A border and status badge show which operation is active.",
+            label = if (repositionEnabled) "Reposition mode" else "Inspection mode",
+            text = if (repositionEnabled) {
+                "One finger moves the overlay; two fingers resize and rotate. Freeze position with the floating control when alignment is ready."
+            } else {
+                "The overlay cannot move. One finger pans the drawing and two fingers zoom around the touch centroid."
+            },
         )
     }
 
@@ -352,6 +568,7 @@ internal fun EditOverlayPanel(
     onScaleChange: (Float) -> Unit,
     onRotationChange: (Float) -> Unit,
     onReset: () -> Unit,
+    onResetView: () -> Unit,
     onAutoAlign: () -> Unit,
     onStartPointFix: () -> Unit,
 ) {
@@ -376,6 +593,7 @@ internal fun EditOverlayPanel(
 
     ActionFlow {
         OutlinedButton(enabled = enabled, onClick = onReset) { Text("Reset") }
+        OutlinedButton(enabled = enabled, onClick = onResetView) { Text("Reset view") }
         OutlinedButton(
             enabled = enabled && canAutoAlign && !autoAlignInProgress,
             onClick = onAutoAlign,
@@ -459,6 +677,7 @@ internal fun FixedOverlayActionsPanel(
     onFrozenOverlayOpacityChange: (Float) -> Unit,
     onHeatmapSimilarityThresholdChange: (Float) -> Unit,
     onHeatmapPaletteChange: (HeatmapPalette) -> Unit,
+    onResetView: () -> Unit,
 ) {
     Text("Display and comparison", style = MaterialTheme.typography.titleSmall)
 
@@ -474,6 +693,7 @@ internal fun FixedOverlayActionsPanel(
     }
 
     ActionFlow {
+        OutlinedButton(onClick = onResetView) { Text("Reset view") }
         OutlinedButton(onClick = onToggleHide) {
             Text(if (hideAllOverlays) "Show overlay" else "Hide overlay")
         }
@@ -495,7 +715,7 @@ internal fun FixedOverlayActionsPanel(
         )
     }
 
-    if (variant == EffectVariant.Heatmap) {
+    if (variant.isGuidance) {
         drawingInstruction?.let { instruction ->
             WorkflowCallout(
                 label = instruction.title,
@@ -509,7 +729,7 @@ internal fun FixedOverlayActionsPanel(
             valueRange = 0.5f..0.99f,
             onValueChange = { onHeatmapSimilarityThresholdChange(it.coerceIn(0.5f, 0.99f)) },
         )
-        Text("Heatmap palette", style = MaterialTheme.typography.labelLarge)
+        Text("Guide palette", style = MaterialTheme.typography.labelLarge)
         ActionFlow {
             FilterChip(
                 selected = heatmapPalette == HeatmapPalette.Color,
@@ -522,6 +742,11 @@ internal fun FixedOverlayActionsPanel(
                 label = { Text("Mono") },
             )
         }
+        Text(
+            "Guides compare rendered pixels and contours; they support observation but are not an objective score of drawing quality.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

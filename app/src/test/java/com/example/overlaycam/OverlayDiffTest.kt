@@ -32,7 +32,7 @@ class OverlayDiffTest {
         assertEquals(1, analysis.summary.matchingPixels)
         assertEquals(2, analysis.summary.differentPixels)
         assertEquals(OverlayDiffBounds(left = 1, top = 0, rightExclusive = 3, bottomExclusive = 2), analysis.summary.changedBounds)
-        assertEquals(DrawingInstructionKind.RefineHighlightedArea, analysis.instruction.kind)
+        assertEquals(DrawingInstructionKind.RefineSimilarity, analysis.instruction.kind)
     }
 
     @Test
@@ -84,10 +84,37 @@ class OverlayDiffTest {
             palette = HeatmapPalette.Mono,
         )
 
-        assertEquals(opaqueRgb(0, 0, 0), analysis.heatmapPixels[0])
-        assertEquals(opaqueRgb(255, 255, 255), analysis.heatmapPixels[1])
-        assertEquals(opaqueRgb(0, 0, 0), analysis.heatmapPixels[2])
+        assertEquals(0x00000000, analysis.guidancePixels[0])
+        assertTrue(analysis.guidancePixels[1] ushr 24 > 0)
+        assertTrue(analysis.guidancePixels[2] ushr 24 > 0)
         assertNotNull(analysis.summary.changedBounds)
+    }
+
+    @Test
+    fun edgeGuideSeparatesMissingExtraAndMatchingContours() {
+        val background = intArrayOf(
+            rgb(0, 0, 0), rgb(255, 255, 255), rgb(255, 255, 255),
+            rgb(0, 0, 0), rgb(255, 255, 255), rgb(0, 0, 0),
+        )
+        val overlay = intArrayOf(
+            rgb(0, 0, 0), rgb(255, 255, 255), rgb(0, 0, 0),
+            rgb(0, 0, 0), rgb(255, 255, 255), rgb(255, 255, 255),
+        )
+
+        val analysis = analyzeOverlayDiff(
+            backgroundPixels = background,
+            overlayPixels = overlay,
+            width = 3,
+            height = 2,
+            similarityThreshold = 0.9f,
+            palette = HeatmapPalette.Color,
+            visualization = GuidanceVisualization.Edges,
+        )
+
+        assertTrue(analysis.summary.edgeComparedPixels > 0)
+        assertTrue(analysis.summary.matchingEdgePixels > 0)
+        assertTrue(analysis.summary.missingEdgePixels + analysis.summary.extraEdgePixels > 0)
+        assertEquals(DrawingInstructionKind.RefineEdges, analysis.instruction.kind)
     }
 
     private fun transparent(): Int = 0x00000000
