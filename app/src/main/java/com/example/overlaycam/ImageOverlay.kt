@@ -28,7 +28,9 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.MaterialTheme
@@ -136,6 +138,7 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
 
         var autoAlignInProgress by remember { mutableStateOf(false) }
         var autoAlignStatus by remember { mutableStateOf<String?>(null) }
+        var gestureOperation by remember { mutableStateOf(OverlayGestureOperation.Idle) }
 
         var pickerTarget by remember { mutableStateOf(PickerTarget.Overlay) }
 
@@ -375,16 +378,8 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
             }
         }
 
-        val transformState: TransformableState = rememberTransformableState { zoom, pan, rot ->
-            if (overlayFixedMode) return@rememberTransformableState
-            if (pointFixMode) {
-                pointFixZoom = (pointFixZoom * zoom).coerceIn(1f, 6f)
-            } else {
-                scaleF = (scaleF * zoom).coerceIn(minScale, maxScale)
-                rotationDeg += rot
-                offsetX += pan.x
-                offsetY += pan.y
-            }
+        val pointFixTransformState: TransformableState = rememberTransformableState { zoom, _, _ ->
+            if (pointFixMode) pointFixZoom = (pointFixZoom * zoom).coerceIn(1f, 6f)
         }
 
         val uiState = OverlayUiState(
@@ -407,6 +402,12 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
             overlayLoadInProgress -> "Loading overlay…"
             autoAlignInProgress -> "Matching image…"
             else -> null
+        }
+
+        LaunchedEffect(uiState.mode, showTools, busyLabel) {
+            if (uiState.mode != OverlayUiMode.EditOverlay || showTools || busyLabel != null) {
+                gestureOperation = OverlayGestureOperation.Idle
+            }
         }
 
         LaunchedEffect(uiState.mode) {
@@ -607,6 +608,11 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                     }
                 }
 
+                val gestureBorderColor = when (gestureOperation) {
+                    OverlayGestureOperation.Move -> MaterialTheme.colorScheme.primary
+                    OverlayGestureOperation.Transform -> MaterialTheme.colorScheme.tertiary
+                    OverlayGestureOperation.Idle -> Color.Transparent
+                }
                 val canvasModifier = Modifier
                     .fillMaxSize()
                     .semantics {
@@ -616,48 +622,83 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                             OverlayUiMode.FixedOverlay -> "Finished overlay preview"
                             else -> "Camera and background preview"
                         }
-                        stateDescription = when (uiState.mode) {
-                            OverlayUiMode.EditOverlay -> "Drag, pinch, or rotate the overlay"
-                            OverlayUiMode.PointFix -> pointMatchUiState.title
-                            OverlayUiMode.FixedOverlay -> variant.label
+                        stateDescription = when {
+                            uiState.mode == OverlayUiMode.EditOverlay &&
+                                gestureOperation != OverlayGestureOperation.Idle -> gestureOperation.instruction
+                            uiState.mode == OverlayUiMode.EditOverlay -> OverlayGestureOperation.Idle.instruction
+                            uiState.mode == OverlayUiMode.PointFix -> pointMatchUiState.title
+                            uiState.mode == OverlayUiMode.FixedOverlay -> variant.label
                             else -> uiState.title
                         }
                     }
-                    .then(if (!overlayFixedMode && busyLabel == null) Modifier.transformable(transformState) else Modifier)
-                    .pointerInput(
-                        pointFixMode,
-                        overlayBitmap,
-                        hasStillBackground,
-                        pendingPointSource,
-                        pointLocks.size,
-                    ) {
-                        detectTapGestures { tap ->
-                            if (busyLabel == null && !overlayFixedMode && pointFixMode && hasStillBackground && overlayBitmap != null) {
-                                val pendingSource = pendingPointSource
-                                when {
-                                    pendingSource != null -> {
-                                        pointLocks.add(FixedPointLock(source = pendingSource, target = tap))
-                                        pendingPointSource = null
-                                        pendingPointScreenPosition = null
-                                    }
-                                    pointLocks.size >= 2 -> coroutineScope.launch {
-                                        snackbarHostState.showSnackbar("Two landmark pairs are already set")
-                                    }
-                                    else -> {
-                                        val source = overlaySourceAt(tap)
-                                        if (source != null) {
-                                            pendingPointSource = source
-                                            pendingPointScreenPosition = tap
-                                        } else {
-                                            coroutineScope.launch {
-                                                snackbarHostState.showSnackbar("Tap inside the visible overlay first")
+                    .drawBehind {
+                        if (gestureOperation != OverlayGestureOperation.Idle) {
+                            drawRect(
+                                color = gestureBorderColor,
+                                style = Stroke(width = 5.dp.toPx()),
+                            )
+                        }
+                    }
+                    .then(
+                        if (pointFixMode && !overlayFixedMode && busyLabel == null) {
+                            Modifier.transformable(pointFixTransformState)
+                        } else {
+                            Modifier
+                        },
+                    )
+                    .overlayTransformGestures(
+                        enabled = uiState.mode == OverlayUiMode.EditOverlay &&
+                            busyLabel == null &&
+                            !showTools,
+                        onOperationChange = { gestureOperation = it },
+                        onMove = { pan ->
+                            offsetX += pan.x
+                            offsetY += pan.y
+                        },
+                        onTransform = { zoom, rotation ->
+                            scaleF = (scaleF * zoom).coerceIn(minScale, maxScale)
+                            rotationDeg += rotation
+                        },
+                    )
+                    .then(
+                        if (pointFixMode) {
+                            Modifier.pointerInput(
+                                overlayBitmap,
+                                hasStillBackground,
+                                pendingPointSource,
+                                pointLocks.size,
+                            ) {
+                                detectTapGestures { tap ->
+                                    if (busyLabel == null && !overlayFixedMode && hasStillBackground && overlayBitmap != null) {
+                                        val pendingSource = pendingPointSource
+                                        when {
+                                            pendingSource != null -> {
+                                                pointLocks.add(FixedPointLock(source = pendingSource, target = tap))
+                                                pendingPointSource = null
+                                                pendingPointScreenPosition = null
+                                            }
+                                            pointLocks.size >= 2 -> coroutineScope.launch {
+                                                snackbarHostState.showSnackbar("Two landmark pairs are already set")
+                                            }
+                                            else -> {
+                                                val source = overlaySourceAt(tap)
+                                                if (source != null) {
+                                                    pendingPointSource = source
+                                                    pendingPointScreenPosition = tap
+                                                } else {
+                                                    coroutineScope.launch {
+                                                        snackbarHostState.showSnackbar("Tap inside the visible overlay first")
+                                                    }
+                                                }
                                             }
                                         }
                                     }
                                 }
                             }
-                        }
-                    }
+                        } else {
+                            Modifier
+                        },
+                    )
 
                 Canvas(modifier = canvasModifier) {
                 val clip = Rect(0f, 0f, size.width, size.height)
@@ -714,19 +755,40 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
             }
 
             AnimatedVisibility(
+                visible = gestureOperation != OverlayGestureOperation.Idle,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(top = 52.dp),
+            ) {
+                GestureOperationFeedback(operation = gestureOperation)
+            }
+
+            AnimatedVisibility(
                 visible = !showTools,
                 modifier = Modifier.align(Alignment.BottomCenter),
             ) {
-                OverlayControlDock(
-                    state = uiState,
-                    busyLabel = busyLabel,
-                    supportingText = pointMatchUiState.title.takeIf {
-                        uiState.mode == OverlayUiMode.PointFix
-                    },
-                    opacity = opacity,
-                    onRecommendedAction = { runRecommendedAction() },
-                    onOpenTools = { showTools = true },
-                )
+                Column(
+                    modifier = Modifier.navigationBarsPadding(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    OverlayControlDock(
+                        state = uiState,
+                        busyLabel = busyLabel,
+                        supportingText = pointMatchUiState.title.takeIf {
+                            uiState.mode == OverlayUiMode.PointFix
+                        },
+                        onRecommendedAction = { runRecommendedAction() },
+                        onOpenTools = { showTools = true },
+                    )
+                    if (uiState.showPersistentOpacityFader) {
+                        PersistentOpacityFader(
+                            opacity = opacity,
+                            enabled = busyLabel == null,
+                            onOpacityChange = { opacity = it },
+                        )
+                    }
+                }
             }
 
             SnackbarHost(
@@ -770,13 +832,11 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                             minScale = minScale,
                             maxScale = maxScale,
                             rotationDeg = rotationDeg,
-                            opacity = opacity,
                             canAutoAlign = hasStillBackground && overlayBitmap != null,
                             autoAlignInProgress = autoAlignInProgress,
                             autoAlignStatus = autoAlignStatus,
                             onScaleChange = { scaleF = it },
                             onRotationChange = { rotationDeg = it },
-                            onOpacityChange = { opacity = it },
                             onReset = {
                                 resetWorkingOverlayTransform(clearPoints = true)
                                 hideAllOverlays = false

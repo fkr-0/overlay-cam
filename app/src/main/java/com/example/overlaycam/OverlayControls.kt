@@ -46,7 +46,6 @@ internal fun OverlayControlDock(
     state: OverlayUiState,
     busyLabel: String?,
     supportingText: String? = null,
-    opacity: Float,
     onRecommendedAction: () -> Unit,
     onOpenTools: () -> Unit,
 ) {
@@ -55,7 +54,6 @@ internal fun OverlayControlDock(
         modifier = modifier
             .widthIn(max = 720.dp)
             .fillMaxWidth()
-            .navigationBarsPadding()
             .padding(horizontal = 12.dp, vertical = 8.dp)
             .animateContentSize(),
         shape = MaterialTheme.shapes.extraLarge,
@@ -111,11 +109,92 @@ internal fun OverlayControlDock(
                     }
                 }
 
-                if (state.showQuickOpacityControl && !isBusy) {
-                    TextButton(onClick = onOpenTools) {
-                        Text(String.format(Locale.getDefault(), "Opacity %.0f%%", opacity * 100f))
-                    }
-                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun PersistentOpacityFader(
+    modifier: Modifier = Modifier,
+    opacity: Float,
+    enabled: Boolean,
+    onOpacityChange: (Float) -> Unit,
+) {
+    Surface(
+        modifier = modifier
+            .widthIn(max = 720.dp)
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        shape = MaterialTheme.shapes.extraLarge,
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
+        tonalElevation = 6.dp,
+        shadowElevation = 12.dp,
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Overlay opacity", style = MaterialTheme.typography.labelLarge)
+                Text(
+                    String.format(Locale.getDefault(), "%.0f%%", opacity * 100f),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Slider(
+                modifier = Modifier.semantics {
+                    contentDescription = "Overlay opacity, permanently available"
+                },
+                enabled = enabled,
+                value = opacity,
+                onValueChange = { onOpacityChange(it.coerceIn(0f, 1f)) },
+                valueRange = 0f..1f,
+            )
+        }
+    }
+}
+
+@Composable
+internal fun GestureOperationFeedback(
+    operation: OverlayGestureOperation,
+    modifier: Modifier = Modifier,
+) {
+    if (operation == OverlayGestureOperation.Idle) return
+
+    val containerColor = when (operation) {
+        OverlayGestureOperation.Move -> MaterialTheme.colorScheme.primaryContainer
+        OverlayGestureOperation.Transform -> MaterialTheme.colorScheme.tertiaryContainer
+        OverlayGestureOperation.Idle -> MaterialTheme.colorScheme.surface
+    }
+    val contentColor = when (operation) {
+        OverlayGestureOperation.Move -> MaterialTheme.colorScheme.onPrimaryContainer
+        OverlayGestureOperation.Transform -> MaterialTheme.colorScheme.onTertiaryContainer
+        OverlayGestureOperation.Idle -> MaterialTheme.colorScheme.onSurface
+    }
+
+    Surface(
+        modifier = modifier,
+        shape = MaterialTheme.shapes.extraLarge,
+        color = containerColor,
+        contentColor = contentColor,
+        tonalElevation = 8.dp,
+        shadowElevation = 10.dp,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(operation.symbol, style = MaterialTheme.typography.titleLarge)
+            Column {
+                Text(operation.label, style = MaterialTheme.typography.titleSmall)
+                Text(operation.instruction, style = MaterialTheme.typography.bodySmall)
             }
         }
     }
@@ -217,7 +296,7 @@ internal fun WorkflowActionPanel(
     if (state.showGestureHint) {
         WorkflowCallout(
             label = "Direct manipulation",
-            text = "Drag to move, pinch to resize, and twist to rotate. The sliders below provide precise and accessible alternatives.",
+            text = "One finger moves the overlay. Two fingers resize and rotate it. A border and status badge show which operation is active.",
         )
     }
 
@@ -261,47 +340,23 @@ internal fun WorkflowActionPanel(
 }
 
 @Composable
-internal fun QuickOpacityControl(
-    opacity: Float,
-    onOpacityChange: (Float) -> Unit,
-) {
-    AdjustmentSlider(
-        label = "Overlay opacity",
-        valueLabel = String.format(Locale.getDefault(), "%.0f%%", opacity * 100f),
-        value = opacity,
-        valueRange = 0f..1f,
-        onValueChange = { onOpacityChange(it.coerceIn(0f, 1f)) },
-    )
-}
-
-@Composable
 internal fun EditOverlayPanel(
     enabled: Boolean,
     scale: Float,
     minScale: Float,
     maxScale: Float,
     rotationDeg: Float,
-    opacity: Float,
     canAutoAlign: Boolean,
     autoAlignInProgress: Boolean,
     autoAlignStatus: String?,
     onScaleChange: (Float) -> Unit,
     onRotationChange: (Float) -> Unit,
-    onOpacityChange: (Float) -> Unit,
     onReset: () -> Unit,
     onAutoAlign: () -> Unit,
     onStartPointFix: () -> Unit,
 ) {
     Text("Fine adjustments", style = MaterialTheme.typography.titleSmall)
 
-    AdjustmentSlider(
-        label = "Opacity",
-        valueLabel = String.format(Locale.getDefault(), "%.0f%%", opacity * 100f),
-        value = opacity,
-        valueRange = 0f..1f,
-        enabled = enabled,
-        onValueChange = { onOpacityChange(it.coerceIn(0f, 1f)) },
-    )
     AdjustmentSlider(
         label = "Size",
         valueLabel = String.format(Locale.getDefault(), "%.2f×", scale),

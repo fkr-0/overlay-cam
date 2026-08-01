@@ -5,6 +5,29 @@ All notable changes to Overlay Cam are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-08-01
+
+### Added
+
+- Live gesture-operation feedback while touching the overlay: a labeled status badge and a mode-specific canvas border distinguish moving from resizing/rotating.
+- A permanently visible opacity fader at the physical bottom of the overlay editing screen.
+- Unit coverage for the pointer-count-to-operation contract.
+
+### Changed
+
+- One active finger now exclusively moves the overlay.
+- Two or more active fingers now exclusively resize and rotate the overlay, avoiding accidental translation during a pinch or twist.
+- Gesture-mode transitions establish a fresh baseline so adding or lifting the second finger does not cause a visible jump.
+- Removed the duplicate opacity slider from the fine-tuning sheet; opacity is always directly available during overlay editing.
+- Increased Android `versionCode` from 2 to 3 and `versionName` from `0.1.1` to `0.2.0`.
+
+### Verification
+
+- Docker-backed `testDebugUnitTest`, `lintDebug`, and `assembleDebug` pass.
+- All 32 unit tests pass; Android lint reports 0 errors and 11 non-blocking dependency-update warnings.
+- The generated APK reports package `com.example.overlaycam`, version code `3`, and version name `0.2.0`.
+- Physical-device multi-touch feel and compact-height layout validation remains recommended.
+
 ## [0.1.1] - 2026-08-01
 
 ### Added

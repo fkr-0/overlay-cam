@@ -79,7 +79,7 @@ class OverlayUiStateTest {
         }
         assertTrue(states[0].recommendedActionHint.contains("still"))
         assertTrue(states[1].recommendedActionHint.contains("overlay"))
-        assertTrue(states[2].recommendedActionHint.contains("Drag"))
+        assertTrue(states[2].recommendedActionHint.contains("One finger"))
         assertTrue(states[3].recommendedActionHint.contains("Save"))
     }
 
@@ -110,7 +110,7 @@ class OverlayUiStateTest {
     }
 
     @Test
-    fun collapsedEditingKeepsTheMostCommonTweakVisible() {
+    fun editingKeepsTheOpacityFaderPermanentlyVisible() {
         val editing = OverlayUiState(hasStillBackground = true, hasOverlay = true)
         val fixed = OverlayUiState(
             hasStillBackground = true,
@@ -118,8 +118,8 @@ class OverlayUiStateTest {
             isOverlayFixed = true,
         )
 
-        assertTrue(editing.showQuickOpacityControl)
-        assertFalse(fixed.showQuickOpacityControl)
+        assertTrue(editing.showPersistentOpacityFader)
+        assertFalse(fixed.showPersistentOpacityFader)
     }
 
     @Test

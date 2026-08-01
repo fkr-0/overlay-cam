@@ -58,7 +58,7 @@ data class OverlayUiState(
             "Choose a background photo to start. Camera access remains optional and can be enabled from Options."
         }
         OverlayUiMode.BackgroundReady -> "Add the image you want to compare or trace over the frozen background."
-        OverlayUiMode.EditOverlay -> "Drag to move, pinch to resize, and twist to rotate. Use the sliders for precise adjustments."
+        OverlayUiMode.EditOverlay -> "Use one finger to move. Use two fingers to resize and rotate. The active operation is shown while you touch the overlay."
         OverlayUiMode.PointFix -> "For each pair, tap a landmark on the overlay first, then tap where it belongs on the background."
         OverlayUiMode.FixedOverlay -> "Save the composite, or reopen the overlay to make another adjustment."
     }
@@ -91,7 +91,7 @@ data class OverlayUiState(
             "Choose a photo to use as the background."
         }
         OverlayUiMode.BackgroundReady -> "Choose an overlay image to begin adjusting it."
-        OverlayUiMode.EditOverlay -> "Drag, pinch, or twist directly on the image."
+        OverlayUiMode.EditOverlay -> "One finger moves; two fingers resize and rotate."
         OverlayUiMode.PointFix -> "Finish when the matching points are placed correctly."
         OverlayUiMode.FixedOverlay -> "Save the finished image to your gallery."
     }
@@ -104,7 +104,7 @@ data class OverlayUiState(
         OverlayUiMode.FixedOverlay -> "More actions"
     }
 
-    val showQuickOpacityControl: Boolean = mode == OverlayUiMode.EditOverlay
+    val showPersistentOpacityFader: Boolean = mode == OverlayUiMode.EditOverlay
     val showGestureHint: Boolean = mode == OverlayUiMode.EditOverlay
     val showPointFixPanel: Boolean = mode == OverlayUiMode.PointFix
     val showEditPanel: Boolean = mode == OverlayUiMode.EditOverlay
