@@ -2,7 +2,9 @@ package com.example.overlaycam
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 class ImageGeometryTest {
     @Test
@@ -59,5 +61,15 @@ class ImageGeometryTest {
         assertEquals(1, bitmapSampleSize(1920, 1080, 4096))
         assertEquals(2, bitmapSampleSize(6000, 4000, 4096))
         assertEquals(4, bitmapSampleSize(12000, 8000, 4096))
+        assertEquals(4, bitmapSampleSize(6000, 4000, 2048))
+    }
+
+    @Test
+    fun overlayLandmarksMustBeInsideTheBitmap() {
+        assertTrue(isPixelInside(width = 100, height = 50, x = 0f, y = 0f))
+        assertTrue(isPixelInside(width = 100, height = 50, x = 99.9f, y = 49.9f))
+        assertFalse(isPixelInside(width = 100, height = 50, x = -0.1f, y = 20f))
+        assertFalse(isPixelInside(width = 100, height = 50, x = 100f, y = 20f))
+        assertFalse(isPixelInside(width = 100, height = 50, x = 20f, y = 50f))
     }
 }

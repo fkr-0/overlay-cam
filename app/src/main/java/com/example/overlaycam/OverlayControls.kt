@@ -21,6 +21,7 @@ import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -37,6 +38,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import java.util.Locale
 
 @Composable
 internal fun OverlayControlDock(
@@ -45,13 +47,13 @@ internal fun OverlayControlDock(
     busyLabel: String?,
     supportingText: String? = null,
     opacity: Float,
-    onOpacityChange: (Float) -> Unit,
     onRecommendedAction: () -> Unit,
     onOpenTools: () -> Unit,
 ) {
     val isBusy = busyLabel != null
     Surface(
         modifier = modifier
+            .widthIn(max = 720.dp)
             .fillMaxWidth()
             .navigationBarsPadding()
             .padding(horizontal = 12.dp, vertical = 8.dp)
@@ -87,28 +89,33 @@ internal fun OverlayControlDock(
                 }
             }
 
-            Button(
-                enabled = !isBusy,
-                onClick = onRecommendedAction,
+            Row(
                 modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                if (isBusy) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        strokeWidth = 2.dp,
-                    )
-                    Spacer(Modifier.size(8.dp))
-                    Text(busyLabel.orEmpty())
-                } else {
-                    Text(state.recommendedActionLabel)
+                Button(
+                    enabled = !isBusy,
+                    onClick = onRecommendedAction,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    if (isBusy) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                        )
+                        Spacer(Modifier.size(8.dp))
+                        Text(busyLabel.orEmpty())
+                    } else {
+                        Text(state.recommendedActionLabel)
+                    }
                 }
-            }
 
-            if (state.showQuickOpacityControl && !isBusy) {
-                QuickOpacityControl(
-                    opacity = opacity,
-                    onOpacityChange = onOpacityChange,
-                )
+                if (state.showQuickOpacityControl && !isBusy) {
+                    TextButton(onClick = onOpenTools) {
+                        Text(String.format(Locale.getDefault(), "Opacity %.0f%%", opacity * 100f))
+                    }
+                }
             }
         }
     }
@@ -186,7 +193,6 @@ internal fun WorkflowActionPanel(
     state: OverlayUiState,
     enabled: Boolean,
     onRecommendedAction: () -> Unit,
-    onFreezeCamera: () -> Unit,
     onEnableCamera: () -> Unit,
     onPickBackground: () -> Unit,
     onPickOverlay: () -> Unit,
@@ -221,7 +227,7 @@ internal fun WorkflowActionPanel(
                 OutlinedButton(enabled = enabled, onClick = onPickBackground) {
                     Text("Use background photo")
                 }
-            } else {
+            } else if (state.cameraSupported) {
                 OutlinedButton(enabled = enabled, onClick = onEnableCamera) {
                     Text("Enable live camera")
                 }
@@ -229,9 +235,7 @@ internal fun WorkflowActionPanel(
         }
 
         OverlayUiMode.BackgroundReady -> ActionFlow {
-            if (state.cameraAvailable) {
-                OutlinedButton(enabled = enabled, onClick = onFreezeCamera) { Text("Refreeze") }
-            } else {
+            if (!state.cameraAvailable && state.cameraSupported) {
                 OutlinedButton(enabled = enabled, onClick = onEnableCamera) {
                     Text("Enable live camera")
                 }
@@ -263,7 +267,7 @@ internal fun QuickOpacityControl(
 ) {
     AdjustmentSlider(
         label = "Overlay opacity",
-        valueLabel = String.format("%.0f%%", opacity * 100f),
+        valueLabel = String.format(Locale.getDefault(), "%.0f%%", opacity * 100f),
         value = opacity,
         valueRange = 0f..1f,
         onValueChange = { onOpacityChange(it.coerceIn(0f, 1f)) },
@@ -292,7 +296,7 @@ internal fun EditOverlayPanel(
 
     AdjustmentSlider(
         label = "Opacity",
-        valueLabel = String.format("%.0f%%", opacity * 100f),
+        valueLabel = String.format(Locale.getDefault(), "%.0f%%", opacity * 100f),
         value = opacity,
         valueRange = 0f..1f,
         enabled = enabled,
@@ -300,7 +304,7 @@ internal fun EditOverlayPanel(
     )
     AdjustmentSlider(
         label = "Size",
-        valueLabel = String.format("%.2f×", scale),
+        valueLabel = String.format(Locale.getDefault(), "%.2f×", scale),
         value = scale,
         valueRange = minScale..maxScale,
         enabled = enabled,
@@ -308,7 +312,7 @@ internal fun EditOverlayPanel(
     )
     AdjustmentSlider(
         label = "Rotation",
-        valueLabel = String.format("%.0f°", rotationDeg),
+        valueLabel = String.format(Locale.getDefault(), "%.0f°", rotationDeg),
         value = rotationDeg.coerceIn(-180f, 180f),
         valueRange = -180f..180f,
         enabled = enabled,
@@ -406,9 +410,11 @@ internal fun FixedOverlayActionsPanel(
     Text("Display mode", style = MaterialTheme.typography.labelLarge)
     ActionFlow {
         EffectVariant.entries.forEach { option ->
-            OutlinedButton(onClick = { onEffectChange(option) }) {
-                Text(if (variant == option) "${option.label} ✓" else option.label)
-            }
+            FilterChip(
+                selected = variant == option,
+                onClick = { onEffectChange(option) },
+                label = { Text(option.label) },
+            )
         }
     }
 
@@ -427,7 +433,7 @@ internal fun FixedOverlayActionsPanel(
     if (flipOverlayAndBackground) {
         AdjustmentSlider(
             label = "Background opacity",
-            valueLabel = String.format("%.0f%%", frozenOverlayOpacity * 100f),
+            valueLabel = String.format(Locale.getDefault(), "%.0f%%", frozenOverlayOpacity * 100f),
             value = frozenOverlayOpacity,
             valueRange = 0f..1f,
             onValueChange = { onFrozenOverlayOpacityChange(it.coerceIn(0f, 1f)) },
@@ -443,19 +449,23 @@ internal fun FixedOverlayActionsPanel(
         }
         AdjustmentSlider(
             label = "Similarity threshold",
-            valueLabel = String.format("%.2f", heatmapSimilarityThreshold),
+            valueLabel = String.format(Locale.getDefault(), "%.2f", heatmapSimilarityThreshold),
             value = heatmapSimilarityThreshold,
             valueRange = 0.5f..0.99f,
             onValueChange = { onHeatmapSimilarityThresholdChange(it.coerceIn(0.5f, 0.99f)) },
         )
         Text("Heatmap palette", style = MaterialTheme.typography.labelLarge)
         ActionFlow {
-            OutlinedButton(onClick = { onHeatmapPaletteChange(HeatmapPalette.Color) }) {
-                Text(if (heatmapPalette == HeatmapPalette.Color) "Color ✓" else "Color")
-            }
-            OutlinedButton(onClick = { onHeatmapPaletteChange(HeatmapPalette.Mono) }) {
-                Text(if (heatmapPalette == HeatmapPalette.Mono) "Mono ✓" else "Mono")
-            }
+            FilterChip(
+                selected = heatmapPalette == HeatmapPalette.Color,
+                onClick = { onHeatmapPaletteChange(HeatmapPalette.Color) },
+                label = { Text("Color") },
+            )
+            FilterChip(
+                selected = heatmapPalette == HeatmapPalette.Mono,
+                onClick = { onHeatmapPaletteChange(HeatmapPalette.Mono) },
+                label = { Text("Mono") },
+            )
         }
     }
 }

@@ -51,3 +51,13 @@ internal fun bitmapSampleSize(
     }
     return sampleSize
 }
+
+internal fun isPixelInside(
+    width: Int,
+    height: Int,
+    x: Float,
+    y: Float,
+): Boolean {
+    require(width > 0 && height > 0) { "Bitmap dimensions must be positive" }
+    return x >= 0f && y >= 0f && x < width && y < height
+}

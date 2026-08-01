@@ -69,7 +69,11 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.core.content.ContextCompat
+import androidx.exifinterface.media.ExifInterface
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -82,7 +86,7 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
-    CameraPermissionGate { cameraAvailable, requestCameraAccess ->
+    CameraPermissionGate { cameraAvailable, cameraSupported, requestCameraAccess ->
         val editor: OverlayEditorViewModel = viewModel()
         var handle by remember { mutableStateOf<CameraHandle?>(null) }
         var previewSize by remember { mutableStateOf(IntSize(1, 1)) }
@@ -151,18 +155,12 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
             heatmapBitmap = null
             heatmapImage = null
             heatmapInstruction = null
+            variantIndex = EffectVariant.Normal.ordinal
         }
 
         DisposableEffect(Unit) {
             onDispose {
                 heatmapBitmap?.takeUnless(Bitmap::isRecycled)?.recycle()
-            }
-        }
-
-        LaunchedEffect(retrySaveAfterPermission) {
-            if (retrySaveAfterPermission) {
-                retrySaveAfterPermission = false
-                saveCurrentComposite()
             }
         }
 
@@ -210,8 +208,9 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
 
             val mapped = floatArrayOf(tap.x, tap.y)
             inverse.mapPoints(mapped)
-            val srcX = mapped[0].coerceIn(0f, bmp.width.toFloat())
-            val srcY = mapped[1].coerceIn(0f, bmp.height.toFloat())
+            val srcX = mapped[0]
+            val srcY = mapped[1]
+            if (!isPixelInside(bmp.width, bmp.height, srcX, srcY)) return null
             return Offset(srcX, srcY)
         }
 
@@ -244,10 +243,15 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
             if (Build.VERSION.SDK_INT < 33) {
                 rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
                     uri?.let {
-                        context.contentResolver.takePersistableUriPermission(
-                            it,
-                            android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
-                        )
+                        try {
+                            context.contentResolver.takePersistableUriPermission(
+                                it,
+                                android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                            )
+                        } catch (_: SecurityException) {
+                            // Some document providers grant only temporary access. The current
+                            // editor session can still use the returned URI safely.
+                        }
                         if (pickerTarget == PickerTarget.Background) backgroundUri = it else overlayUri = it
                     }
                 }
@@ -303,6 +307,10 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
 
         val hasStillBackground = backgroundBitmap != null
 
+        LaunchedEffect(hasStillBackground) {
+            if (hasStillBackground) handle = null
+        }
+
         val visibleLayersForEffects = listOfNotNull(
             if (hideAllOverlays) null else lockedLayerA,
             if (hideAllOverlays) null else lockedLayerB,
@@ -319,33 +327,48 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
             heatmapPalette
         ) {
             if (variant == EffectVariant.Heatmap && hasStillBackground && previewSize.width > 1 && previewSize.height > 1 && visibleLayersForEffects.isNotEmpty()) {
-                val generated = withContext(Dispatchers.Default) {
-                    buildHeatmapRender(
-                        background = backgroundBitmap!!,
-                        outputWidth = previewSize.width,
-                        outputHeight = previewSize.height,
-                        layers = visibleLayersForEffects,
-                        similarityThreshold = heatmapSimilarityThreshold,
-                        palette = heatmapPalette,
-                        matrixForLayer = { layer ->
-                            buildOverlayMatrix(
-                                previewSize = previewSize,
-                                overlay = layer.bitmap,
-                                scale = layer.scale,
-                                rotation = layer.rotation,
-                                offsetX = layer.offsetX,
-                                offsetY = layer.offsetY,
-                                fixedPoints = layer.fixedPoints
-                            )
-                        }
-                    )
+                var generated: HeatmapRender? = null
+                try {
+                    generated = withContext(Dispatchers.Default) {
+                        buildHeatmapRender(
+                            background = backgroundBitmap!!,
+                            outputWidth = previewSize.width,
+                            outputHeight = previewSize.height,
+                            layers = visibleLayersForEffects,
+                            similarityThreshold = heatmapSimilarityThreshold,
+                            palette = heatmapPalette,
+                            matrixForLayer = { layer ->
+                                buildOverlayMatrix(
+                                    previewSize = previewSize,
+                                    overlay = layer.bitmap,
+                                    scale = layer.scale,
+                                    rotation = layer.rotation,
+                                    offsetX = layer.offsetX,
+                                    offsetY = layer.offsetY,
+                                    fixedPoints = layer.fixedPoints,
+                                )
+                            },
+                        )
+                    }
+                    currentCoroutineContext().ensureActive()
+                    heatmapBitmap?.takeUnless(Bitmap::isRecycled)?.recycle()
+                    heatmapBitmap = generated?.bitmap
+                    heatmapImage = generated?.bitmap?.asImageBitmap()
+                    heatmapInstruction = generated?.instruction
+                    generated = null
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    heatmapBitmap?.takeUnless(Bitmap::isRecycled)?.recycle()
+                    heatmapBitmap = null
+                    heatmapImage = null
+                    heatmapInstruction = null
+                    snackbarHostState.showSnackbar("Could not generate the comparison heatmap")
+                } finally {
+                    generated?.bitmap?.takeUnless(Bitmap::isRecycled)?.recycle()
                 }
-                heatmapBitmap?.recycle()
-                heatmapBitmap = generated?.bitmap
-                heatmapImage = generated?.bitmap?.asImageBitmap()
-                heatmapInstruction = generated?.instruction
             } else {
-                heatmapBitmap?.recycle()
+                heatmapBitmap?.takeUnless(Bitmap::isRecycled)?.recycle()
                 heatmapBitmap = null
                 heatmapImage = null
                 heatmapInstruction = null
@@ -367,6 +390,7 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
         val uiState = OverlayUiState(
             hasStillBackground = hasStillBackground,
             cameraAvailable = cameraAvailable,
+            cameraSupported = cameraSupported,
             hasOverlay = currentWorkingLayerOrNull() != null || lockedLayerA != null || lockedLayerB != null,
             isOverlayFixed = overlayFixedMode,
             isPointFixMode = pointFixMode,
@@ -386,6 +410,10 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
         }
 
         LaunchedEffect(uiState.mode) {
+            showTools = false
+        }
+
+        BackHandler(enabled = showTools) {
             showTools = false
         }
 
@@ -447,6 +475,7 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
             overlayFixedMode = false
             pointFixMode = false
             addOverlayPending = false
+            variantIndex = EffectVariant.Normal.ordinal
             showTools = true
         }
 
@@ -494,6 +523,13 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                         snackbarHostState.showSnackbar(result.message)
                     }
                 }
+            }
+        }
+
+        LaunchedEffect(retrySaveAfterPermission) {
+            if (retrySaveAfterPermission) {
+                retrySaveAfterPermission = false
+                saveCurrentComposite()
             }
         }
 
@@ -608,9 +644,14 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                                         snackbarHostState.showSnackbar("Two landmark pairs are already set")
                                     }
                                     else -> {
-                                        overlaySourceAt(tap)?.let { source ->
+                                        val source = overlaySourceAt(tap)
+                                        if (source != null) {
                                             pendingPointSource = source
                                             pendingPointScreenPosition = tap
+                                        } else {
+                                            coroutineScope.launch {
+                                                snackbarHostState.showSnackbar("Tap inside the visible overlay first")
+                                            }
                                         }
                                     }
                                 }
@@ -683,7 +724,6 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                         uiState.mode == OverlayUiMode.PointFix
                     },
                     opacity = opacity,
-                    onOpacityChange = { opacity = it },
                     onRecommendedAction = { runRecommendedAction() },
                     onOpenTools = { showTools = true },
                 )
@@ -706,7 +746,6 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                         state = uiState,
                         enabled = busyLabel == null,
                         onRecommendedAction = { runRecommendedAction() },
-                        onFreezeCamera = { freezeCameraBackground("Background refreshed") },
                         onEnableCamera = requestCameraAccess,
                         onPickBackground = {
                             showTools = false
@@ -749,28 +788,35 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                                     autoAlignInProgress = true
                                     autoAlignStatus = "Matching image patterns…"
                                     coroutineScope.launch {
-                                        val result = withContext(Dispatchers.Default) {
-                                            estimateOverlayAutoAlignment(
-                                                background = bg,
-                                                overlay = ov,
-                                                previewSize = previewSize,
-                                                scale = scaleF,
-                                                rotation = rotationDeg,
-                                                offsetX = offsetX,
-                                                offsetY = offsetY,
-                                                fixedPoints = pointLocks.toList(),
-                                            )
+                                        try {
+                                            val result = withContext(Dispatchers.Default) {
+                                                estimateOverlayAutoAlignment(
+                                                    background = bg,
+                                                    overlay = ov,
+                                                    previewSize = previewSize,
+                                                    scale = scaleF,
+                                                    rotation = rotationDeg,
+                                                    offsetX = offsetX,
+                                                    offsetY = offsetY,
+                                                    fixedPoints = pointLocks.toList(),
+                                                )
+                                            }
+                                            if (result != null && result.score >= 0.18f) {
+                                                offsetX += result.dx
+                                                offsetY += result.dy
+                                                autoAlignStatus = "Auto-aligned by ${String.format(Locale.getDefault(), "%.0f", result.dx)} × ${String.format(Locale.getDefault(), "%.0f", result.dy)} px · confidence ${String.format(Locale.getDefault(), "%.2f", result.score)}"
+                                            } else if (result != null) {
+                                                autoAlignStatus = "No confident match · best confidence ${String.format(Locale.getDefault(), "%.2f", result.score)}"
+                                            } else {
+                                                autoAlignStatus = "No usable textured overlay area found"
+                                            }
+                                        } catch (cancelled: CancellationException) {
+                                            throw cancelled
+                                        } catch (_: Exception) {
+                                            autoAlignStatus = "Auto alignment failed"
+                                        } finally {
+                                            autoAlignInProgress = false
                                         }
-                                        if (result != null && result.score >= 0.18f) {
-                                            offsetX += result.dx
-                                            offsetY += result.dy
-                                            autoAlignStatus = "Auto-aligned by ${String.format("%.0f", result.dx)} × ${String.format("%.0f", result.dy)} px · confidence ${String.format("%.2f", result.score)}"
-                                        } else if (result != null) {
-                                            autoAlignStatus = "No confident match · best confidence ${String.format("%.2f", result.score)}"
-                                        } else {
-                                            autoAlignStatus = "No usable textured overlay area found"
-                                        }
-                                        autoAlignInProgress = false
                                     }
                                 }
                             },
@@ -810,6 +856,7 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                             onAddOverlay = {
                                 addOverlayPending = true
                                 overlayFixedMode = false
+                                variantIndex = EffectVariant.Normal.ordinal
                                 resetWorkingOverlayTransform(clearPoints = true)
                                 overlayBitmap = null
                                 overlayUri = null
@@ -833,31 +880,78 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
 private suspend fun decodeBitmapForEditor(
     context: android.content.Context,
     uri: Uri,
-    maxEdge: Int = 4096,
+    maxEdge: Int = 2048,
 ): Bitmap? = withContext(Dispatchers.IO) {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-        val source = ImageDecoder.createSource(context.contentResolver, uri)
-        ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
-            decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-            decoder.setTargetSampleSize(
-                bitmapSampleSize(info.size.width, info.size.height, maxEdge),
-            )
-        }
-    } else {
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        context.contentResolver.openInputStream(uri)?.use { stream ->
-            BitmapFactory.decodeStream(stream, null, bounds)
-        }
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@withContext null
+    try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val source = ImageDecoder.createSource(context.contentResolver, uri)
+            ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+                decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                decoder.setTargetSampleSize(
+                    bitmapSampleSize(info.size.width, info.size.height, maxEdge),
+                )
+            }
+        } else {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                BitmapFactory.decodeStream(stream, null, bounds)
+            }
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@withContext null
 
-        val options = BitmapFactory.Options().apply {
-            inSampleSize = bitmapSampleSize(bounds.outWidth, bounds.outHeight, maxEdge)
-            inPreferredConfig = Bitmap.Config.ARGB_8888
+            val options = BitmapFactory.Options().apply {
+                inSampleSize = bitmapSampleSize(bounds.outWidth, bounds.outHeight, maxEdge)
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            }
+            val decoded = context.contentResolver.openInputStream(uri)?.use { stream ->
+                BitmapFactory.decodeStream(stream, null, options)
+            }
+            decoded?.let { bitmap ->
+                val orientation = context.contentResolver.openInputStream(uri)?.use { stream ->
+                    ExifInterface(stream).getAttributeInt(
+                        ExifInterface.TAG_ORIENTATION,
+                        ExifInterface.ORIENTATION_NORMAL,
+                    )
+                } ?: ExifInterface.ORIENTATION_NORMAL
+                applyExifOrientation(bitmap, orientation)
+            }
         }
-        context.contentResolver.openInputStream(uri)?.use { stream ->
-            BitmapFactory.decodeStream(stream, null, options)
-        }
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        null
     }
+}
+
+private fun applyExifOrientation(bitmap: Bitmap, orientation: Int): Bitmap {
+    val matrix = Matrix()
+    when (orientation) {
+        ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.setScale(-1f, 1f)
+        ExifInterface.ORIENTATION_ROTATE_180 -> matrix.setRotate(180f)
+        ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.setScale(1f, -1f)
+        ExifInterface.ORIENTATION_TRANSPOSE -> {
+            matrix.setRotate(90f)
+            matrix.postScale(-1f, 1f)
+        }
+        ExifInterface.ORIENTATION_ROTATE_90 -> matrix.setRotate(90f)
+        ExifInterface.ORIENTATION_TRANSVERSE -> {
+            matrix.setRotate(-90f)
+            matrix.postScale(-1f, 1f)
+        }
+        ExifInterface.ORIENTATION_ROTATE_270 -> matrix.setRotate(-90f)
+        else -> return bitmap
+    }
+
+    val transformed = Bitmap.createBitmap(
+        bitmap,
+        0,
+        0,
+        bitmap.width,
+        bitmap.height,
+        matrix,
+        true,
+    )
+    if (transformed !== bitmap) bitmap.recycle()
+    return transformed
 }
 
 private fun centerCropBitmap(source: Bitmap, targetWidth: Int, targetHeight: Int): Bitmap {
@@ -956,14 +1050,19 @@ private suspend fun saveCompositeLayers(
                     )
                 }
                 SaveCompositeResult("Saved to Pictures/OverlayCam")
-            } catch (error: Throwable) {
-                insertedUri?.let { resolver.delete(it, null, null) }
+            } catch (cancelled: CancellationException) {
+                insertedUri?.let { runCatching { resolver.delete(it, null, null) } }
+                throw cancelled
+            } catch (error: Exception) {
+                insertedUri?.let { runCatching { resolver.delete(it, null, null) } }
                 SaveCompositeResult("Save failed: ${error.message ?: "unknown error"}")
             } finally {
                 outBitmap.recycle()
             }
         }
-    } catch (error: Throwable) {
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (error: Exception) {
         SaveCompositeResult("Save failed: ${error.message ?: "unknown error"}")
     }
 }
@@ -989,90 +1088,92 @@ private fun estimateOverlayAutoAlignment(
 
     val backgroundMatch = scaledCenterCropBitmap(background, matchWidth, matchHeight)
     val overlayMatch = Bitmap.createBitmap(matchWidth, matchHeight, Bitmap.Config.ARGB_8888)
-    val overlayCanvas = Canvas(overlayMatch)
-    val scaledLocks = fixedPoints.map { lock ->
-        FixedPointLock(
-            source = lock.source,
-            target = Offset(lock.target.x * downscale, lock.target.y * downscale),
-        )
-    }
-    val matrix = buildOverlayMatrix(
-        previewSize = IntSize(matchWidth, matchHeight),
-        overlay = overlay,
-        scale = scale,
-        rotation = rotation,
-        offsetX = offsetX * downscale,
-        offsetY = offsetY * downscale,
-        fixedPoints = scaledLocks,
-    )
-    overlayCanvas.drawBitmap(
-        overlay,
-        matrix,
-        Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            alpha = 255
-            isFilterBitmap = true
-        },
-    )
-
-    val backgroundPixels = IntArray(matchWidth * matchHeight)
-    val overlayPixels = IntArray(matchWidth * matchHeight)
-    backgroundMatch.getPixels(backgroundPixels, 0, matchWidth, 0, 0, matchWidth, matchHeight)
-    overlayMatch.getPixels(overlayPixels, 0, matchWidth, 0, 0, matchWidth, matchHeight)
-
-    val backgroundLuma = FloatArray(backgroundPixels.size)
-    val overlayLuma = FloatArray(overlayPixels.size)
-    val validMask = BooleanArray(overlayPixels.size)
-    var validCount = 0
-    for (i in overlayPixels.indices) {
-        backgroundLuma[i] = lumaOf(backgroundPixels[i])
-        val alpha = overlayPixels[i] ushr 24 and 0xFF
-        if (alpha > 16) {
-            overlayLuma[i] = lumaOf(overlayPixels[i])
-            validMask[i] = true
-            validCount += 1
+    try {
+        val overlayCanvas = Canvas(overlayMatch)
+        val scaledLocks = fixedPoints.map { lock ->
+            FixedPointLock(
+                source = lock.source,
+                target = Offset(lock.target.x * downscale, lock.target.y * downscale),
+            )
         }
+        val matrix = buildOverlayMatrix(
+            previewSize = IntSize(matchWidth, matchHeight),
+            overlay = overlay,
+            scale = scale,
+            rotation = rotation,
+            offsetX = offsetX * downscale,
+            offsetY = offsetY * downscale,
+            fixedPoints = scaledLocks,
+        )
+        overlayCanvas.drawBitmap(
+            overlay,
+            matrix,
+            Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                alpha = 255
+                isFilterBitmap = true
+            },
+        )
+
+        val backgroundPixels = IntArray(matchWidth * matchHeight)
+        val overlayPixels = IntArray(matchWidth * matchHeight)
+        backgroundMatch.getPixels(backgroundPixels, 0, matchWidth, 0, 0, matchWidth, matchHeight)
+        overlayMatch.getPixels(overlayPixels, 0, matchWidth, 0, 0, matchWidth, matchHeight)
+
+        val backgroundLuma = FloatArray(backgroundPixels.size)
+        val overlayLuma = FloatArray(overlayPixels.size)
+        val validMask = BooleanArray(overlayPixels.size)
+        var validCount = 0
+        for (i in overlayPixels.indices) {
+            backgroundLuma[i] = lumaOf(backgroundPixels[i])
+            val alpha = overlayPixels[i] ushr 24 and 0xFF
+            if (alpha > 16) {
+                overlayLuma[i] = lumaOf(overlayPixels[i])
+                validMask[i] = true
+                validCount += 1
+            }
+        }
+
+        if (validCount < 80) return null
+
+        val minSamples = kotlin.math.max(48, validCount / 12)
+        val coarse = findBestLumaTranslation(
+            backgroundLuma = backgroundLuma,
+            overlayLuma = overlayLuma,
+            validMask = validMask,
+            width = matchWidth,
+            height = matchHeight,
+            radiusX = matchWidth / 2,
+            radiusY = matchHeight / 2,
+            stepPixels = 8,
+            sampleStride = 4,
+            minComparedSamples = minSamples,
+        ) ?: return null
+
+        val fine = findBestLumaTranslation(
+            backgroundLuma = backgroundLuma,
+            overlayLuma = overlayLuma,
+            validMask = validMask,
+            width = matchWidth,
+            height = matchHeight,
+            centerDx = coarse.dx,
+            centerDy = coarse.dy,
+            radiusX = 10,
+            radiusY = 10,
+            stepPixels = 2,
+            sampleStride = 2,
+            minComparedSamples = minSamples,
+        ) ?: coarse
+
+        return AutoAlignResult(
+            dx = fine.dx / downscale,
+            dy = fine.dy / downscale,
+            score = fine.score,
+            comparedSamples = fine.comparedSamples,
+        )
+    } finally {
+        if (backgroundMatch !== background && !backgroundMatch.isRecycled) backgroundMatch.recycle()
+        if (!overlayMatch.isRecycled) overlayMatch.recycle()
     }
-
-    if (validCount < 80) return null
-
-    val minSamples = kotlin.math.max(48, validCount / 12)
-    val coarse = findBestLumaTranslation(
-        backgroundLuma = backgroundLuma,
-        overlayLuma = overlayLuma,
-        validMask = validMask,
-        width = matchWidth,
-        height = matchHeight,
-        radiusX = matchWidth / 2,
-        radiusY = matchHeight / 2,
-        stepPixels = 8,
-        sampleStride = 4,
-        minComparedSamples = minSamples,
-    ) ?: return null
-
-    val fine = findBestLumaTranslation(
-        backgroundLuma = backgroundLuma,
-        overlayLuma = overlayLuma,
-        validMask = validMask,
-        width = matchWidth,
-        height = matchHeight,
-        centerDx = coarse.dx,
-        centerDy = coarse.dy,
-        radiusX = 10,
-        radiusY = 10,
-        stepPixels = 2,
-        sampleStride = 2,
-        minComparedSamples = minSamples,
-    ) ?: coarse
-
-    if (backgroundMatch !== background) backgroundMatch.recycle()
-    overlayMatch.recycle()
-
-    return AutoAlignResult(
-        dx = fine.dx / downscale,
-        dy = fine.dy / downscale,
-        score = fine.score,
-        comparedSamples = fine.comparedSamples,
-    )
 }
 
 private fun lumaOf(pixel: Int): Float {

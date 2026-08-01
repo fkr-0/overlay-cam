@@ -24,11 +24,18 @@ import androidx.lifecycle.LifecycleOwner
 fun CameraPermissionGate(
     content: @Composable (
         cameraAvailable: Boolean,
+        cameraSupported: Boolean,
         requestCameraAccess: () -> Unit,
     ) -> Unit,
 ) {
     val context = LocalContext.current
     val permission = Manifest.permission.CAMERA
+    val cameraSupported = context.packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)
+
+    if (!cameraSupported) {
+        content(false, false) {}
+        return
+    }
 
     var granted by rememberSaveable { mutableStateOf(isCameraPermissionGranted(context)) }
     var systemRequestInFlight by rememberSaveable { mutableStateOf(false) }
@@ -68,8 +75,8 @@ fun CameraPermissionGate(
     )
 
     when (permissionState.stage) {
-        CameraPermissionStage.Granted -> content(true, ::launchSystemPermissionRequest)
-        CameraPermissionStage.PhotoOnly -> content(false, ::launchSystemPermissionRequest)
+        CameraPermissionStage.Granted -> content(true, true, ::launchSystemPermissionRequest)
+        CameraPermissionStage.PhotoOnly -> content(false, true, ::launchSystemPermissionRequest)
         CameraPermissionStage.RequestingSystemPermission -> PermissionRequestInProgress()
         CameraPermissionStage.ChooseAccess -> CameraAccessChoice(
             wasDenied = hasRequestedPermission,

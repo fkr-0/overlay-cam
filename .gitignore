@@ -96,3 +96,5 @@ lint/tmp/
 
 # Project-specific
 app/build/
+.ws-bridge/
+export/

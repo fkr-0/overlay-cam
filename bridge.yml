@@ -1,0 +1,60 @@
+version: 1
+name: overlay-cam
+description: Android camera overlay app. Bridge commands mirror Makefile targets.
+defaultTrack: dev
+shell: true
+agent:
+  notes: Use Makefile-backed commands through bridge.yml. The project policy in AGENTS.md says builds should run in Docker, not directly on host Gradle.
+  tasks:
+    - "Keep startup UI modal-safe: never show app-level permission/setup prompts while the Android runtime permission sheet is in flight."
+    - Preserve the single primary OverlayUiState mode contract for editor panels.
+    - Keep the dedicated Makefile test target as the fast validation path for modal/state-machine regressions.
+  changelog:
+    - "Derived bridge.yml commands from Makefile targets: docker, docker-nocache, build, clean, test, shell, install, up, ci."
+    - Added a Makefile test target for Docker-backed testDebugUnitTest and mapped bridge test to it.
+commands:
+  docker:
+    run: ["make", "docker"]
+    description: Build the Android SDK Docker image.
+    timeoutMs: 900000
+    category: build
+  docker-nocache:
+    run: ["make", "docker-nocache"]
+    description: Rebuild the Android SDK Docker image without Docker layer cache.
+    timeoutMs: 1200000
+    category: build
+  build:
+    run: ["make", "build"]
+    description: Build the debug APK inside Docker.
+    timeoutMs: 900000
+    category: build
+  clean:
+    run: ["make", "clean"]
+    description: Run Gradle clean inside Docker.
+    timeoutMs: 600000
+    category: build
+  shell:
+    run: ["make", "shell"]
+    description: Open an interactive Android Docker dev shell.
+    timeoutMs: 3600000
+    category: dev
+  install:
+    run: ["make", "install"]
+    description: Install the debug APK to a connected Android device via host adb.
+    timeoutMs: 300000
+    category: dev
+  up:
+    run: ["make", "up"]
+    description: Run docker compose one-shot build workflow.
+    timeoutMs: 900000
+    category: build
+  ci:
+    run: ["make", "ci"]
+    description: Simulate CI locally through the Docker image and APK build.
+    timeoutMs: 1200000
+    category: test
+  test:
+    run: ["make", "test"]
+    description: Run Docker-backed Gradle unit tests.
+    timeoutMs: 900000
+    category: test

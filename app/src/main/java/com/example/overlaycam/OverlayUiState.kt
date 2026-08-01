@@ -20,6 +20,7 @@ enum class OverlayRecommendedAction {
 data class OverlayUiState(
     val hasStillBackground: Boolean,
     val cameraAvailable: Boolean = true,
+    val cameraSupported: Boolean = true,
     val hasOverlay: Boolean = false,
     val isOverlayFixed: Boolean = false,
     val isPointFixMode: Boolean = false,
@@ -51,6 +52,8 @@ data class OverlayUiState(
     val guidance: String = when (mode) {
         OverlayUiMode.Setup -> if (cameraAvailable) {
             "Hold the camera still, then freeze the frame. You can also use a photo as the background."
+        } else if (!cameraSupported) {
+            "This device has no usable camera. Choose a background photo to start."
         } else {
             "Choose a background photo to start. Camera access remains optional and can be enabled from Options."
         }

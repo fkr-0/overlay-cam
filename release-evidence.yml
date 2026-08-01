@@ -1,0 +1,56 @@
+schema_version: 1
+release:
+  unit: overlay-cam
+  date: 2026-08-01
+  base_revision: 6a17c1f48ce5c0d2bf64a0485148b1138019ac89
+  release_revision: "resolved by refs/tags/v0.1.1"
+  version_before:
+    version_code: 1
+    version_name: "0.1"
+  version_after:
+    version_code: 2
+    version_name: "0.1.1"
+  tag:
+    name: v0.1.1
+    kind: annotated
+    created: true
+  publish_state: not_requested
+  push_state: not_requested
+
+metadata:
+  changelog: CHANGELOG.md
+  version_source: app/build.gradle.kts
+  release_metadata_changed:
+    - app/build.gradle.kts
+    - CHANGELOG.md
+
+verification:
+  - command: make test
+    result: passed
+    detail: Docker-backed testDebugUnitTest
+  - command: docker run --rm -v "$PWD":/work -v "$HOME/.gradle":/.gradle -w /work overlay-cam:android bash -lc "bash ./scripts/gradle-in-docker.sh lintDebug"
+    result: passed
+    detail: 0 errors; 11 non-blocking dependency-update warnings
+  - command: make build
+    result: passed
+    detail: Docker-backed assembleDebug
+  - command: aapt dump badging release/overlay-cam-0.1.1-debug.apk
+    result: passed
+    detail: package com.example.overlaycam, versionCode 2, versionName 0.1.1, minSdk 24, targetSdk 34
+
+artifacts:
+  - path: release/overlay-cam-0.1.1-debug.apk
+    kind: debug_apk
+    size_bytes: 14736881
+    sha256: 53e977c503fd1768c139260d40bec0fce02b34a0a70a7cd25e0a34ea89eea8e0
+
+omitted_checks:
+  - physical-device camera startup and lifecycle
+  - gesture feel and compact-height landscape behavior
+  - TalkBack traversal and large-font rendering
+  - API 24-28 gallery save on real hardware
+  - OEM photo picker behavior
+
+known_warnings:
+  - Android lint reports newer dependency versions; dependency upgrades were intentionally excluded from this patch release.
+  - The delivered APK is debug-signed and intended for direct testing, not store publication.

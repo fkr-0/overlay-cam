@@ -52,6 +52,19 @@ class OverlayUiStateTest {
     }
 
     @Test
+    fun cameraLessDeviceUsesPhotoModeWithoutOfferingCameraSetup() {
+        val state = OverlayUiState(
+            hasStillBackground = false,
+            cameraAvailable = false,
+            cameraSupported = false,
+        )
+
+        assertEquals(OverlayUiMode.Setup, state.mode)
+        assertEquals(OverlayRecommendedAction.PickBackground, state.recommendedAction)
+        assertTrue(state.guidance.contains("no usable camera"))
+    }
+
+    @Test
     fun workflowCopyExplainsTheImmediateActionWithoutNumberedSteps() {
         val states = listOf(
             OverlayUiState(hasStillBackground = false),

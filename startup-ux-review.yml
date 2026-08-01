@@ -1,0 +1,199 @@
+project: overlay-cam
+review_scope:
+  - app startup flow
+  - permission gate
+  - Compose modal/panel state
+  - Makefile-to-bridge command coverage
+
+findings:
+  - id: ux-startup-permission-overlap
+    severity: high
+    status: fixed
+    files:
+      - app/src/main/java/com/example/overlaycam/Permissions.kt
+      - app/src/main/java/com/example/overlaycam/CameraPermissionUiState.kt
+      - app/src/test/java/com/example/overlaycam/CameraPermissionUiStateTest.kt
+    problem: >-
+      CameraPermissionGate launched the Android runtime camera permission sheet in
+      LaunchedEffect(Unit) while also immediately rendering the app's own permission
+      prompt whenever granted=false. On first startup this produced a stacked modal
+      experience before the editor's setup flow appeared.
+    fix: >-
+      Introduced CameraPermissionUiState with explicit Granted,
+      RequestingSystemPermission, and NeedsUserAction stages. The app now shows a
+      neutral waiting surface while the Android permission sheet is in flight and
+      only shows the manual retry prompt after the system request returns denied.
+    validation:
+      - CameraPermissionUiStateTest covers granted, first launch, in-flight request, and denied retry states.
+      - make build succeeded in Docker.
+      - make test succeeded in Docker.
+
+  - id: ux-editor-panel-overlap
+    severity: medium
+    status: already_mitigated
+    files:
+      - app/src/main/java/com/example/overlaycam/OverlayUiState.kt
+      - app/src/test/java/com/example/overlaycam/OverlayUiStateTest.kt
+      - app/src/main/java/com/example/overlaycam/ImageOverlay.kt
+    problem: >-
+      The editor previously risked showing setup, primary toolbar, edit panel,
+      point-fix panel, and fixed-overlay actions in competing visual layers.
+    current_state: >-
+      OverlayUiState now enforces one primary mode and ImageOverlay renders panels
+      from that mode. Unit tests cover setup, background-ready, edit, point-fix,
+      fixed-overlay, and fixed-wins-over-point-fix behavior.
+    remaining_risk: >-
+      This is tested at presentation-model level, not with an instrumentation or
+      Compose UI screenshot test. A future UI test should assert no duplicate prompt
+      text or overlapping modal surfaces on cold start.
+
+  - id: bridge-makefile-coverage
+    severity: low
+    status: fixed
+    files:
+      - Makefile
+      - bridge.yml
+    problem: >-
+      The project had a Makefile but no bridge.yml and no dedicated unit-test target.
+    fix: >-
+      Added bridge.yml commands derived from Makefile targets and added make test
+      for Docker-backed testDebugUnitTest. Updated ci to include test.
+
+  - id: auto-align-pattern-matching
+    severity: feature
+    status: implemented_first_pass
+    files:
+      - app/src/main/java/com/example/overlaycam/ImageOverlay.kt
+      - app/src/main/java/com/example/overlaycam/PatternMatch.kt
+      - app/src/test/java/com/example/overlaycam/PatternMatchTest.kt
+    goal: >-
+      Help the user align a reference/overlay image over a recreated camera
+      background with similar angle and composition.
+    implementation: >-
+      Added an Auto align action in the edit panel. It renders the current overlay
+      at reduced preview resolution, uses valid overlay pixels as a mask, and runs
+      zero-mean normalized luminance cross-correlation against the background to
+      estimate the best translation. The result is applied as an offset delta when
+      the score is confident enough.
+    limits: >-
+      This first pass solves translation only. The user still sets approximate
+      scale and rotation manually. Future tasks can add multi-scale search,
+      rotation bracketing, feature/keypoint matching, and a visual confidence
+      preview before applying.
+    validation:
+      - PatternMatchTest verifies recovery of a known synthetic translation.
+      - make test passed in Docker.
+      - make build passed in Docker.
+
+  - id: dialog-widget-module-cleanup
+    severity: architecture
+    status: fixed
+    files:
+      - app/src/main/java/com/example/overlaycam/Permissions.kt
+      - app/src/main/java/com/example/overlaycam/PermissionWidgets.kt
+      - app/src/main/java/com/example/overlaycam/OverlayControls.kt
+      - app/src/main/java/com/example/overlaycam/OverlayModels.kt
+      - app/src/main/java/com/example/overlaycam/OverlayUiState.kt
+      - app/src/main/java/com/example/overlaycam/ImageOverlay.kt
+    problem: >-
+      Startup and editor UX code was still concentrated inside ImageOverlay.kt,
+      with controls, dialog-like permission presentation, mode labels, and model
+      declarations mixed into one screen implementation.
+    fix: >-
+      Split permission presentation into PermissionWidgets, moved shared overlay
+      models/enums into OverlayModels, and extracted the bottom-sheet setup/editor
+      controls into OverlayControls. Updated mode titles and setup copy to present
+      a clear step flow: set background, add reference overlay, align, point-fix,
+      review/save.
+    validation:
+      - make test passed in Docker.
+      - make build passed in Docker.
+
+  - id: guided-dialog-copy-polish
+    severity: ux
+    status: fixed
+    files:
+      - app/src/main/java/com/example/overlaycam/OverlayUiState.kt
+      - app/src/main/java/com/example/overlaycam/OverlayControls.kt
+      - app/src/main/java/com/example/overlaycam/PermissionWidgets.kt
+      - app/src/main/java/com/example/overlaycam/Permissions.kt
+    problem: >-
+      The UI had functional panels, but the dialogue copy did not yet behave like
+      a guided workflow for recreating a reference image. Permission denial also
+      lacked a direct Android Settings escape hatch.
+    fix: >-
+      Added tested stage labels and guidance to OverlayUiState, displayed the
+      current stage as a chip in the control sheet, simplified per-panel copy,
+      and added Retry/Open Settings actions to the camera permission denial view.
+    validation:
+      - make test passed in Docker.
+      - make build passed in Docker and produced app-debug.apk.
+
+  - id: auto-align-grid-center-tiebreak
+    severity: bug
+    status: fixed
+    files:
+      - app/src/main/java/com/example/overlaycam/PatternMatch.kt
+      - app/src/test/java/com/example/overlaycam/PatternMatchTest.kt
+    problem: >-
+      The luma translation matcher enumerated candidates from the negative edge of
+      the search radius. When stepPixels did not divide the radius evenly, the
+      configured center candidate could be skipped. On repetitive textures, equal
+      scores could also choose the first far-away candidate rather than the least
+      disruptive center-nearest match.
+    fix: >-
+      Candidate enumeration now always includes the search center. Match ranking
+      now prefers higher score, then nearest-to-center translation, then more
+      compared samples.
+    validation:
+      - PatternMatchTest covers skipped-center grids and equal-score tie breaking.
+      - make test passed in Docker.
+      - make build passed in Docker.
+
+  - id: diff-analysis-instruction-core
+    severity: architecture
+    status: fixed
+    files:
+      - app/src/main/java/com/example/overlaycam/OverlayDiff.kt
+      - app/src/main/java/com/example/overlaycam/ImageOverlay.kt
+      - app/src/main/java/com/example/overlaycam/OverlayControls.kt
+      - app/src/test/java/com/example/overlaycam/OverlayDiffTest.kt
+    problem: >-
+      Heatmap coloring was embedded directly in ImageOverlay, which made future
+      diff highlighting and drawing instructions hard to test without UI or Android
+      bitmap plumbing.
+    fix: >-
+      Added a pure OverlayDiff analysis module that creates heatmap pixels,
+      summarizes compared/matching/different pixels, tracks changed bounds, and
+      derives drawing instructions. ImageOverlay now renders heatmaps through that
+      tested core and the fixed-overlay control sheet shows the current instruction
+      in Heatmap mode.
+    validation:
+      - OverlayDiffTest covers matching/different summaries, changed bounds,
+        no-overlay instruction, aligned instruction, and heatmap output pixels.
+      - make test passed in Docker.
+      - make build passed in Docker.
+
+bridge_commands:
+  docker: make docker
+  docker-nocache: make docker-nocache
+  build: make build
+  clean: make clean
+  test: make test
+  shell: make shell
+  install: make install
+  up: make up
+  ci: make ci
+
+validation_summary:
+  make_build: passed
+  make_test: passed
+  unit_tests:
+    CameraPermissionUiStateTest: 4 passed
+    OverlayUiStateTest: 6 passed
+
+recommended_next_tasks:
+  - Add a Compose UI/instrumentation test that cold-starts the app and asserts the startup surface never shows both the manual permission prompt and the background setup card.
+  - Extend Auto align from translation-only matching to multi-scale and small-angle rotation search.
+  - Add an optional confidence preview overlay before applying Auto align shifts.
+  - Consider moving the large ImageOverlay composable into smaller composables now that modal state is explicit.
