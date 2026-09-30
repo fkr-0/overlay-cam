@@ -461,6 +461,7 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
             if (bmp != null) {
                 backgroundBitmap?.recycle()
                 backgroundBitmap = bmp
+                resetViewport()
                 showTools = false
                 coroutineScope.launch { snackbarHostState.showSnackbar(successMessage) }
             } else {
@@ -662,10 +663,11 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                             uiState.showComparisonControls &&
                                 gestureOperation != OverlayGestureOperation.Idle -> gestureOperation.instruction
                             uiState.showComparisonControls -> if (repositionEnabled && !overlayFixedMode) {
-                                "Reposition enabled. One finger moves; two fingers resize and rotate."
+                                "Reposition enabled. One finger moves; two fingers resize and rotate. View zoom remains available in the fader rail."
                             } else {
                                 "Position frozen. One finger pans; two fingers zoom."
                             }
+                            uiState.canInspectFrozenScene -> "Frozen background. One finger pans; two fingers zoom."
                             uiState.mode == OverlayUiMode.PointFix -> pointMatchUiState.title
                             uiState.mode == OverlayUiMode.FixedOverlay -> variant.label
                             else -> uiState.title
@@ -687,14 +689,15 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                         },
                     )
                     .overlayCanvasGestures(
-                        enabled = uiState.showComparisonControls &&
+                        enabled = uiState.canInspectFrozenScene &&
                             busyLabel == null &&
                             !showTools &&
                             !pointFixMode,
-                        repositionEnabled = repositionEnabled && !overlayFixedMode,
+                        repositionEnabled = uiState.showComparisonControls &&
+                            repositionEnabled && !overlayFixedMode,
                         onOperationChange = { gestureOperation = it },
                         onOneFingerPan = { pan ->
-                            if (repositionEnabled && !overlayFixedMode) {
+                            if (uiState.showComparisonControls && repositionEnabled && !overlayFixedMode) {
                                 offsetX += pan.x
                                 offsetY += pan.y
                             } else {
@@ -703,7 +706,7 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                             }
                         },
                         onTwoFingerTransform = { zoom, rotation, centroid ->
-                            if (repositionEnabled && !overlayFixedMode) {
+                            if (uiState.showComparisonControls && repositionEnabled && !overlayFixedMode) {
                                 scaleF = (scaleF * zoom).coerceIn(minScale, maxScale)
                                 rotationDeg += rotation
                             } else {
@@ -883,13 +886,13 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                             state = uiState,
                             busyLabel = busyLabel,
                             mix = opacity,
+                            viewScale = viewportScale,
                             variant = variant,
                             availableVariants = variants.filter(EffectVariant::showInComparisonBar),
-                            summary = guidanceSummary,
-                            instruction = guidanceInstruction,
-                            analysisUpdating = guidanceUpdating,
                             enabled = busyLabel == null,
                             onMixChange = { opacity = it },
+                            onViewScaleChange = { viewportScale = it },
+                            onResetView = { resetViewport() },
                             onVariantChange = { selected ->
                                 variantIndex = variants.indexOf(selected)
                             },
@@ -903,6 +906,10 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                             supportingText = pointMatchUiState.title.takeIf {
                                 uiState.mode == OverlayUiMode.PointFix
                             },
+                            viewScale = viewportScale,
+                            showViewFader = uiState.canInspectFrozenScene,
+                            onViewScaleChange = { viewportScale = it },
+                            onResetView = { resetViewport() },
                             onRecommendedAction = { runRecommendedAction() },
                             onOpenTools = { showTools = true },
                         )

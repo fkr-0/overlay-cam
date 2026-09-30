@@ -19,11 +19,13 @@ class OverlayUiStateTest {
 
         assertEquals(OverlayRecommendedAction.FreezeFrame, live.recommendedAction)
         assertEquals("Freeze frame", live.recommendedActionLabel)
+        assertEquals("Freeze", live.compactActionLabel)
         assertEquals("Live camera", live.title)
         assertEquals("LIVE", live.stageLabel)
 
         assertEquals(OverlayRecommendedAction.PickOverlay, backgroundReady.recommendedAction)
         assertEquals("Add overlay image", backgroundReady.recommendedActionLabel)
+        assertEquals("Add image", backgroundReady.compactActionLabel)
         assertEquals("Background ready", backgroundReady.title)
 
         assertEquals(OverlayRecommendedAction.FinishAdjusting, editing.recommendedAction)
@@ -107,6 +109,22 @@ class OverlayUiStateTest {
                 isOverlayFixed = true,
             ).expandActionLabel,
         )
+    }
+
+    @Test
+    fun frozenBackgroundCanBeInspectedBeforeOverlaySelection() {
+        val live = OverlayUiState(hasStillBackground = false)
+        val frozen = OverlayUiState(hasStillBackground = true)
+        val pointFix = OverlayUiState(
+            hasStillBackground = true,
+            hasOverlay = true,
+            isPointFixMode = true,
+        )
+
+        assertFalse(live.canInspectFrozenScene)
+        assertTrue(frozen.canInspectFrozenScene)
+        assertTrue(frozen.recommendedActionHint.contains("zoom"))
+        assertFalse(pointFix.canInspectFrozenScene)
     }
 
     @Test

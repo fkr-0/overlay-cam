@@ -16,13 +16,14 @@ The revised experience is based on five explicit stages:
 
 ## Implemented interaction model
 
-- One compact bottom dock is the only persistent control surface.
+- One compact bottom dock/fader rail is the only persistent control surface.
 - One dominant action advances the current workflow stage.
 - Secondary and precision controls live in one mutually exclusive Material 3 bottom sheet.
 - Opening the sheet hides the dock, eliminating stacked or overlapping menus.
 - Android back dismisses the tools sheet before leaving point-matching mode or the screen.
 - The dock has a maximum width for tablets and landscape layouts.
-- The former always-visible opacity slider was removed from the preview surface. Its current value remains visible as a compact affordance, while editing happens in the fine-tuning sheet.
+- The 0.4.0 correction restores only the two high-frequency faders to the preview surface: compact **Blend** and **View zoom** rails. Advanced comparison modes, metrics, alignment, and point tools remain in the sheet.
+- A frozen camera frame or background photo is now directly pannable/zoomable before an overlay is selected; the explicit View zoom fader remains available even while overlay-position gestures are unlocked.
 - Comparison modes and heatmap palettes now use selected Material 3 filter chips instead of visually identical outlined buttons with textual checkmarks.
 - Long-running load, match, and save operations disable conflicting actions and expose progress in the primary action.
 - Snackbars remain in the top safe area, away from the bottom workflow controls.

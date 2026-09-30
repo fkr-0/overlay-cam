@@ -50,86 +50,74 @@ internal fun OverlayControlDock(
     state: OverlayUiState,
     busyLabel: String?,
     supportingText: String? = null,
+    viewScale: Float,
+    showViewFader: Boolean,
+    onViewScaleChange: (Float) -> Unit,
+    onResetView: () -> Unit,
     onRecommendedAction: () -> Unit,
     onOpenTools: () -> Unit,
 ) {
     val isBusy = busyLabel != null
-    val compact = state.mode == OverlayUiMode.EditOverlay || state.mode == OverlayUiMode.FixedOverlay
     Surface(
         modifier = modifier
             .widthIn(max = 720.dp)
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .padding(horizontal = 12.dp, vertical = 6.dp)
             .animateContentSize(),
         shape = MaterialTheme.shapes.extraLarge,
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
-        tonalElevation = 6.dp,
-        shadowElevation = 12.dp,
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+        tonalElevation = 4.dp,
+        shadowElevation = 8.dp,
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = if (compact) 8.dp else 12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 StagePill(state.stageLabel)
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(state.title, style = MaterialTheme.typography.titleMedium)
-                    if (!compact || isBusy) {
-                        Text(
-                            text = busyLabel ?: supportingText ?: state.recommendedActionHint,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-                if (compact) {
-                    Button(enabled = !isBusy, onClick = onRecommendedAction) {
-                        Text(state.recommendedActionLabel)
-                    }
+                if (isBusy) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                    )
+                    Text(
+                        text = busyLabel.orEmpty(),
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 } else {
-                    TextButton(
-                        enabled = !isBusy,
-                        onClick = onOpenTools,
-                    ) {
-                        Text(state.expandActionLabel)
-                    }
+                    Text(
+                        text = supportingText ?: state.title,
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                }
+                TextButton(enabled = !isBusy, onClick = onOpenTools) {
+                    Text(state.expandActionLabel)
+                }
+                Button(enabled = !isBusy, onClick = onRecommendedAction) {
+                    Text(state.compactActionLabel)
                 }
             }
 
-            if (compact) {
-                TextButton(
-                    enabled = !isBusy,
-                    onClick = onOpenTools,
-                    modifier = Modifier.align(Alignment.End),
-                ) {
-                    Text(state.expandActionLabel)
-                }
-            } else Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Button(
-                    enabled = !isBusy,
-                    onClick = onRecommendedAction,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    if (isBusy) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            strokeWidth = 2.dp,
-                        )
-                        Spacer(Modifier.size(8.dp))
-                        Text(busyLabel.orEmpty())
-                    } else {
-                        Text(state.recommendedActionLabel)
-                    }
-                }
-
+            if (showViewFader && !isBusy) {
+                CompactFaderRow(
+                    label = "View",
+                    valueLabel = String.format(Locale.getDefault(), "%.1f×", viewScale),
+                    value = viewScale,
+                    valueRange = 1f..6f,
+                    contentDescription = "Zoom frozen scene",
+                    onValueChange = { onViewScaleChange(it.coerceIn(1f, 6f)) },
+                    resetLabel = "1×",
+                    onReset = onResetView,
+                )
             }
         }
     }
@@ -141,188 +129,135 @@ internal fun ComparisonControlBar(
     state: OverlayUiState,
     busyLabel: String?,
     mix: Float,
+    viewScale: Float,
     variant: EffectVariant,
     availableVariants: List<EffectVariant>,
-    summary: OverlayDiffSummary?,
-    instruction: DrawingInstruction?,
-    analysisUpdating: Boolean,
     enabled: Boolean,
     onMixChange: (Float) -> Unit,
+    onViewScaleChange: (Float) -> Unit,
+    onResetView: () -> Unit,
     onVariantChange: (EffectVariant) -> Unit,
     onPrimaryAction: () -> Unit,
     onOpenTools: () -> Unit,
 ) {
-    val narrowHeader = LocalConfiguration.current.screenWidthDp < 420
     Surface(
         modifier = modifier
             .widthIn(max = 720.dp)
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 4.dp),
         shape = MaterialTheme.shapes.extraLarge,
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
-        tonalElevation = 6.dp,
-        shadowElevation = 12.dp,
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+        tonalElevation = 4.dp,
+        shadowElevation = 8.dp,
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                StagePill(state.stageLabel)
-                Text(
-                    text = state.title,
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                if (!narrowHeader) {
-                    TextButton(enabled = enabled, onClick = onOpenTools) {
-                        Text(state.expandActionLabel)
-                    }
-                    Button(enabled = enabled, onClick = onPrimaryAction) {
-                        if (busyLabel != null) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(18.dp),
-                                strokeWidth = 2.dp,
-                            )
-                        } else {
-                            Text(state.recommendedActionLabel)
+                TextButton(
+                    enabled = enabled && availableVariants.isNotEmpty(),
+                    onClick = {
+                        if (availableVariants.isNotEmpty()) {
+                            val current = availableVariants.indexOf(variant).coerceAtLeast(0)
+                            onVariantChange(availableVariants[(current + 1) % availableVariants.size])
                         }
-                    }
-                }
-            }
-            if (narrowHeader) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically,
+                    },
                 ) {
-                    TextButton(enabled = enabled, onClick = onOpenTools) {
-                        Text(state.expandActionLabel)
-                    }
-                    Button(enabled = enabled, onClick = onPrimaryAction) {
-                        if (busyLabel != null) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(18.dp),
-                                strokeWidth = 2.dp,
-                            )
-                        } else {
-                            Text(state.recommendedActionLabel)
-                        }
-                    }
-                }
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column {
-                    Text("Compare", style = MaterialTheme.typography.labelLarge)
-                    Text(
-                        "Drawing ↔ ${variant.label}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Text(variant.shortLabel)
                 }
                 Text(
-                    String.format(Locale.getDefault(), "%.0f%%", mix * 100f),
+                    text = if (state.isRepositionEnabled) "Move overlay" else "Inspect",
+                    modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
                 )
-            }
-            Slider(
-                modifier = Modifier.semantics {
-                    contentDescription = "Shift continuously between drawing and ${variant.label}"
-                },
-                enabled = enabled,
-                value = mix,
-                onValueChange = { onMixChange(it.coerceIn(0f, 1f)) },
-                valueRange = 0f..1f,
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Text("Drawing", style = MaterialTheme.typography.labelSmall)
-                Text(variant.shortLabel, style = MaterialTheme.typography.labelSmall)
-            }
-            ActionFlow {
-                availableVariants.forEach { option ->
-                    FilterChip(
-                        selected = variant == option,
-                        enabled = enabled,
-                        onClick = { onVariantChange(option) },
-                        label = { Text(option.shortLabel) },
-                    )
+                TextButton(enabled = enabled, onClick = onOpenTools) {
+                    Text(state.expandActionLabel)
+                }
+                Button(enabled = enabled, onClick = onPrimaryAction) {
+                    if (busyLabel != null) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                        )
+                    } else {
+                        Text(state.compactActionLabel)
+                    }
                 }
             }
 
-            if (variant.isGuidance) {
-                if (summary != null) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        ComparisonMetric(
-                            modifier = Modifier.weight(1f),
-                            label = "Accuracy",
-                            value = String.format(Locale.getDefault(), "%.0f%%", summary.matchRatio * 100f),
-                        )
-                        ComparisonMetric(
-                            modifier = Modifier.weight(1f),
-                            label = "Similarity",
-                            value = String.format(Locale.getDefault(), "%.0f%%", summary.averageSimilarity * 100f),
-                        )
-                        ComparisonMetric(
-                            modifier = Modifier.weight(1f),
-                            label = "Contours",
-                            value = if (summary.edgeComparedPixels == 0) "—" else
-                                String.format(Locale.getDefault(), "%.0f%%", summary.edgeMatchRatio * 100f),
-                        )
-                    }
-                }
-                Text(
-                    text = when {
-                        analysisUpdating -> "Updating guide…"
-                        instruction != null -> instruction.title
-                        else -> "Guide unavailable"
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                if (!analysisUpdating && instruction != null) {
-                    Text(
-                        text = instruction.detail,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
+            CompactFaderRow(
+                label = "Blend",
+                valueLabel = String.format(Locale.getDefault(), "%.0f%%", mix * 100f),
+                value = mix,
+                valueRange = 0f..1f,
+                enabled = enabled,
+                contentDescription = "Overlay blend",
+                onValueChange = { onMixChange(it.coerceIn(0f, 1f)) },
+            )
+            CompactFaderRow(
+                label = "View",
+                valueLabel = String.format(Locale.getDefault(), "%.1f×", viewScale),
+                value = viewScale,
+                valueRange = 1f..6f,
+                enabled = enabled,
+                contentDescription = "Zoom frozen scene",
+                onValueChange = { onViewScaleChange(it.coerceIn(1f, 6f)) },
+                resetLabel = "1×",
+                onReset = onResetView,
+            )
         }
     }
 }
 
 @Composable
-private fun ComparisonMetric(
-    modifier: Modifier = Modifier,
+private fun CompactFaderRow(
     label: String,
-    value: String,
+    valueLabel: String,
+    value: Float,
+    valueRange: ClosedFloatingPointRange<Float>,
+    contentDescription: String,
+    enabled: Boolean = true,
+    onValueChange: (Float) -> Unit,
+    resetLabel: String? = null,
+    onReset: (() -> Unit)? = null,
 ) {
-    Surface(
-        modifier = modifier,
-        shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(value, style = MaterialTheme.typography.titleSmall)
-            Text(label, style = MaterialTheme.typography.labelSmall)
+        Text(
+            text = label,
+            modifier = Modifier.widthIn(min = 38.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Slider(
+            modifier = Modifier
+                .weight(1f)
+                .semantics { this.contentDescription = contentDescription },
+            enabled = enabled,
+            value = value,
+            onValueChange = onValueChange,
+            valueRange = valueRange,
+        )
+        Text(
+            text = valueLabel,
+            modifier = Modifier.widthIn(min = 40.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (resetLabel != null && onReset != null) {
+            TextButton(enabled = enabled, onClick = onReset) {
+                Text(resetLabel)
+            }
         }
     }
 }
@@ -496,7 +431,7 @@ internal fun WorkflowActionPanel(
         onClick = onRecommendedAction,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Text(state.recommendedActionLabel)
+        Text(state.compactActionLabel)
     }
 
     Text(

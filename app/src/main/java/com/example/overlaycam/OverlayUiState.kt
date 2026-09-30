@@ -89,13 +89,22 @@ data class OverlayUiState(
         OverlayRecommendedAction.SaveImage -> "Save image"
     }
 
+    val compactActionLabel: String = when (recommendedAction) {
+        OverlayRecommendedAction.FreezeFrame -> "Freeze"
+        OverlayRecommendedAction.PickBackground -> "Photo"
+        OverlayRecommendedAction.PickOverlay -> "Add image"
+        OverlayRecommendedAction.FinishAdjusting -> "Set"
+        OverlayRecommendedAction.FinishPointFix -> "Done"
+        OverlayRecommendedAction.SaveImage -> "Save"
+    }
+
     val recommendedActionHint: String = when (mode) {
         OverlayUiMode.Setup -> if (cameraAvailable) {
             "Hold still, then freeze the camera frame."
         } else {
             "Choose a photo to use as the background."
         }
-        OverlayUiMode.BackgroundReady -> "Choose an overlay image to begin adjusting it."
+        OverlayUiMode.BackgroundReady -> "Pan with one finger or zoom the frozen scene, then add an overlay image."
         OverlayUiMode.EditOverlay -> if (isRepositionEnabled) {
             "Move with one finger; resize and rotate with two."
         } else {
@@ -113,6 +122,7 @@ data class OverlayUiState(
         OverlayUiMode.FixedOverlay -> "More actions"
     }
 
+    val canInspectFrozenScene: Boolean = hasStillBackground && mode != OverlayUiMode.PointFix
     val showComparisonControls: Boolean = mode == OverlayUiMode.EditOverlay || mode == OverlayUiMode.FixedOverlay
     val showGestureHint: Boolean = mode == OverlayUiMode.EditOverlay
     val showPointFixPanel: Boolean = mode == OverlayUiMode.PointFix
