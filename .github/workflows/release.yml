@@ -65,7 +65,7 @@ jobs:
             -v "$HOME/.gradle":/.gradle \
             -w /work \
             overlay-cam:android \
-            bash -lc "./scripts/gradle-in-docker.sh testDebugUnitTest"
+            bash -lc "bash ./scripts/gradle-in-docker.sh testDebugUnitTest"
 
       - name: Restore release keystore
         shell: bash
@@ -91,7 +91,7 @@ jobs:
             -e ANDROID_KEYSTORE_PASSWORD -e ANDROID_KEY_ALIAS -e ANDROID_KEY_PASSWORD \
             -w /work \
             overlay-cam:android \
-            bash -lc "./scripts/gradle-in-docker.sh assembleRelease -PrequireReleaseSigning=true"
+            bash -lc "bash ./scripts/gradle-in-docker.sh assembleRelease -PrequireReleaseSigning=true"
 
       - name: Remove keystore
         if: always()

@@ -23,7 +23,7 @@ jobs:
             -v "$HOME/.gradle":/.gradle \
             -w /work \
             overlay-cam:android \
-            bash -lc "./scripts/gradle-in-docker.sh assembleDebug"
+            bash -lc "bash ./scripts/gradle-in-docker.sh assembleDebug"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
