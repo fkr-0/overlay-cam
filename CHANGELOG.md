@@ -5,6 +5,43 @@ All notable changes to Overlay Cam are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-10-30
+
+### Added
+
+- **Streaming effects** composited in-app and shared by the preview, saved images, and stream output: chroma key (green/blue/magenta, tolerance, edge softness), picture-in-picture, image/logo overlay, and an animated text overlay (built-in or custom font), plus named effect presets.
+- **OBS-ready MJPEG output** that serves the composited frame on a user-chosen port, and an **OBS WebSocket v5** client (authenticated) to switch scenes and start/stop the stream and virtual camera.
+- **Manual X / Y / Z faders** (value and spring-centered step modes) for precise overlay offset and scale, and an independent **Frozen View** zoom fader (0.5×–20×) that never alters exported geometry.
+- **Recent frozen scenes** on the top rail. Locked placements are stored with the scene and reopen in inspection mode; reopening is transactional, so a failed restore never replaces the current image.
+- **Start-new-frame confirmation** before discarding an alignment, and a one-stage **Back** action.
+- **Hide / Controls** toggle that clears routine chrome for unobstructed inspection.
+- Light haptic tick when switching between *Position unlocked* and *Position frozen*.
+- Unit tests for the manual faders, session restart, recent sessions, streaming effects, and OBS authentication.
+
+### Changed
+
+- The advanced Tools sheet is capped to roughly half of the screen height and scrolls, instead of covering most of the screen.
+- Streaming panel is accessibility-first: whole-row switch targets (≥48 dp), TalkBack labels and values on every slider, section headings, and live-region status messages.
+- OBS controls reflect connection state: Connect is disabled until a host is entered, and scene/stream/virtual-camera actions are enabled only while connected. A rejected OBS request no longer drops a live session out of the connected state.
+- Input fields use the right keyboards (numeric ports, URI host, password) with autocorrect disabled for host and password; *Save preset* requires a name.
+- Streaming, top-rail, recent-scene and restart-dialog text moved to Android string resources to enable localization. Other editor strings still need migration.
+- Recent-scene thumbnails are decorative so TalkBack reads each row once instead of announcing duplicate image labels.
+- Camera grid toggle exposes its on/off state to assistive technology.
+- Version numbering is back on the 0.x SemVer line (`versionName` `0.4.0`, `versionCode` 5). Intermediate unreleased builds labelled `4.1.1` / `411` are superseded.
+
+### Security & privacy
+
+- The app now declares `INTERNET` and allows cleartext traffic so it can reach an OBS host on the local network over `ws://`. Use the secure-connection (WSS) switch when OBS is configured for TLS.
+- While MJPEG output is enabled, **anyone on the same network who knows the address can view the stream** (no authentication). The panel warns about this; turn output off when not streaming.
+- OBS credentials are held in memory only and are not saved with presets.
+
+### Verification
+
+- Docker-backed `testDebugUnitTest`, `lintDebug`, and `assembleDebug` pass.
+- All 62 unit tests pass.
+- The generated APK reports package `com.example.overlaycam`, version code `5`, and version name `0.4.0`.
+- Physical-device validation remains recommended for multi-touch feel, TalkBack traversal of the new streaming panel, large font scales, and OBS interoperability.
+
 ## [0.3.0] - 2026-08-01
 
 ### Added

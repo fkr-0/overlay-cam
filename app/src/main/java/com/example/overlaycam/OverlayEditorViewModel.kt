@@ -44,12 +44,18 @@ internal class OverlayEditorViewModel : ViewModel() {
     val heatmapSimilarityThreshold = mutableFloatStateOf(0.85f)
     val heatmapPalette = mutableStateOf(HeatmapPalette.Color)
 
+    val streamingEffects = mutableStateOf(StreamingEffectsState())
+    val pictureInPictureBitmap = mutableStateOf<Bitmap?>(null)
+    val logoBitmap = mutableStateOf<Bitmap?>(null)
+
     override fun onCleared() {
         listOfNotNull(
             backgroundBitmap.value,
             overlayBitmap.value,
             lockedLayerA.value?.bitmap,
             lockedLayerB.value?.bitmap,
+            pictureInPictureBitmap.value,
+            logoBitmap.value,
         ).distinct().forEach { bitmap ->
             if (!bitmap.isRecycled) bitmap.recycle()
         }

@@ -1,3 +1,107 @@
 <resources>
     <string name="app_name">Overlay Cam</string>
+
+    <!-- Top rail -->
+    <string name="rail_controls">Controls</string>
+    <string name="rail_back">Back</string>
+    <string name="rail_recent">Recent</string>
+    <string name="rail_new">New</string>
+    <string name="rail_hide">Hide</string>
+    <string name="rail_grid">Grid</string>
+    <string name="rail_grid_on">Grid on</string>
+    <string name="rail_grid_state_on">On</string>
+    <string name="rail_grid_state_off">Off</string>
+
+    <!-- Recent scenes -->
+    <string name="recent_title">Recent frozen scenes</string>
+    <string name="recent_empty">Nothing captured yet</string>
+    <string name="recent_close">Close</string>
+
+    <!-- Restart dialog -->
+    <string name="restart_title">Start new camera frame?</string>
+    <string name="restart_message">This resets the current alignment but keeps your recent scenes and images available.</string>
+    <string name="restart_confirm">New frame</string>
+    <string name="restart_cancel">Cancel</string>
+
+    <!-- Streaming effects -->
+    <string name="fx_title">Streaming effects</string>
+    <string name="fx_intro">PiP, logo and text are composited in-app. Chroma key can remove a chosen key color from PiP or logo media.</string>
+    <string name="fx_chroma_key">Chroma key</string>
+    <string name="fx_key_source">Key source</string>
+    <string name="fx_key_color">Key color</string>
+    <string name="fx_target_pip">PiP</string>
+    <string name="fx_target_logo">Logo</string>
+    <string name="fx_target_both">Both</string>
+    <string name="fx_color_green">Green</string>
+    <string name="fx_color_blue">Blue</string>
+    <string name="fx_color_magenta">Magenta</string>
+    <string name="fx_tolerance">Tolerance</string>
+    <string name="fx_edge_softness">Edge softness</string>
+    <string name="fx_pip">Picture in picture</string>
+    <string name="fx_choose_pip">Choose PiP image</string>
+    <string name="fx_pip_size">PiP size</string>
+    <string name="fx_pip_opacity">PiP opacity</string>
+    <string name="fx_logo">Image / logo overlay</string>
+    <string name="fx_choose_logo">Choose logo</string>
+    <string name="fx_logo_size">Logo size</string>
+    <string name="fx_logo_opacity">Logo opacity</string>
+    <string name="fx_text">Text overlay</string>
+    <string name="fx_text_field">Overlay text</string>
+    <string name="fx_font">Font</string>
+    <string name="fx_font_sans">Sans</string>
+    <string name="fx_font_serif">Serif</string>
+    <string name="fx_font_monospace">Monospace</string>
+    <string name="fx_font_cursive">Cursive</string>
+    <string name="fx_font_custom">Custom file…</string>
+    <string name="fx_text_size">Text size</string>
+    <string name="fx_text_opacity">Text opacity</string>
+    <string name="fx_animation">Animation</string>
+    <string name="fx_animation_none">None</string>
+    <string name="fx_animation_pulse">Pulse</string>
+    <string name="fx_animation_slide">Slide</string>
+    <string name="fx_horizontal">Horizontal</string>
+    <string name="fx_vertical">Vertical</string>
+    <string name="fx_size_sp">%1$d sp</string>
+
+    <string name="fx_presets">Effect presets</string>
+    <string name="fx_preset_name">Preset name</string>
+    <string name="fx_preset_save">Save preset</string>
+    <string name="fx_preset_load">Load %1$s</string>
+
+    <string name="fx_mjpeg_title">OBS-ready MJPEG output</string>
+    <string name="fx_mjpeg_serve">Serve composited stream</string>
+    <string name="fx_mjpeg_port">MJPEG port</string>
+    <string name="fx_mjpeg_privacy">While serving, anyone on the same network who knows the address can watch this stream. Turn it off when you are not streaming.</string>
+    <string name="fx_mjpeg_off">MJPEG output off</string>
+    <string name="fx_mjpeg_serving">Serving %1$s</string>
+    <string name="fx_mjpeg_failed">MJPEG output failed: %1$s</string>
+    <string name="fx_unknown_error">unknown error</string>
+    <string name="fx_preset_saved">Saved effects preset %1$s</string>
+    <string name="fx_preset_loaded">Loaded effects preset %1$s</string>
+
+    <string name="obs_title">OBS WebSocket v5</string>
+    <string name="obs_host">OBS host</string>
+    <string name="obs_port">Port</string>
+    <string name="obs_secure">Use secure connection (WSS)</string>
+    <string name="obs_password">Password</string>
+    <string name="obs_scene">Scene</string>
+    <string name="obs_connect">Connect</string>
+    <string name="obs_connecting">Connecting…</string>
+    <string name="obs_disconnect">Disconnect</string>
+    <string name="obs_set_scene">Set scene</string>
+    <string name="obs_start_stream">Start stream</string>
+    <string name="obs_stop_stream">Stop stream</string>
+    <string name="obs_start_vcam">Start virtual cam</string>
+    <string name="obs_stop_vcam">Stop virtual cam</string>
+    <string name="obs_status_disconnected">OBS disconnected</string>
+    <string name="obs_status_scene_changed">OBS scene changed</string>
+    <string name="obs_status_scene_failed">Scene change failed</string>
+    <string name="obs_status_stream_started">OBS stream started</string>
+    <string name="obs_status_stream_start_failed">Start stream failed</string>
+    <string name="obs_status_stream_stopped">OBS stream stopped</string>
+    <string name="obs_status_stream_stop_failed">Stop stream failed</string>
+    <string name="obs_status_vcam_started">OBS virtual camera started</string>
+    <string name="obs_status_vcam_start_failed">Start virtual camera failed</string>
+    <string name="obs_status_vcam_stopped">OBS virtual camera stopped</string>
+    <string name="obs_status_vcam_stop_failed">Stop virtual camera failed</string>
 </resources>

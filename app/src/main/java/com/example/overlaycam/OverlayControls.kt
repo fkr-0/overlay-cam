@@ -1,6 +1,9 @@
 package com.example.overlaycam
 
 import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -33,13 +36,27 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.setProgress
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import java.util.Locale
@@ -109,12 +126,12 @@ internal fun OverlayControlDock(
 
             if (showViewFader && !isBusy) {
                 CompactFaderRow(
-                    label = "View",
-                    valueLabel = String.format(Locale.getDefault(), "%.1f×", viewScale),
-                    value = viewScale,
-                    valueRange = 1f..6f,
-                    contentDescription = "Zoom frozen scene",
-                    onValueChange = { onViewScaleChange(it.coerceIn(1f, 6f)) },
+                    label = "Frozen View",
+                    valueLabel = String.format(Locale.getDefault(), "%.2f×", viewScale),
+                    value = frozenZoomPosition(viewScale),
+                    valueRange = 0f..1f,
+                    contentDescription = "Frozen View zoom, inspection only, 0.5 to 20 times",
+                    onValueChange = { onViewScaleChange(frozenZoomScaleAt(it)) },
                     resetLabel = "1×",
                     onReset = onResetView,
                 )
@@ -130,16 +147,25 @@ internal fun ComparisonControlBar(
     busyLabel: String?,
     mix: Float,
     viewScale: Float,
+    overlayScale: Float,
     variant: EffectVariant,
     availableVariants: List<EffectVariant>,
     enabled: Boolean,
     onMixChange: (Float) -> Unit,
     onViewScaleChange: (Float) -> Unit,
     onResetView: () -> Unit,
+    onOverlayScaleChange: (Float) -> Unit,
+    onResetOverlayScale: () -> Unit,
     onVariantChange: (EffectVariant) -> Unit,
     onPrimaryAction: () -> Unit,
     onOpenTools: () -> Unit,
 ) {
+    var showSizeFader by remember { mutableStateOf(false) }
+    LaunchedEffect(state.isRepositionEnabled, state.mode) {
+        if (!state.isRepositionEnabled || state.mode != OverlayUiMode.EditOverlay) {
+            showSizeFader = false
+        }
+    }
     Surface(
         modifier = modifier
             .widthIn(max = 720.dp)
@@ -177,6 +203,12 @@ internal fun ComparisonControlBar(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                 )
+                if (state.mode == OverlayUiMode.EditOverlay && state.isRepositionEnabled) {
+                    TextButton(
+                        enabled = enabled,
+                        onClick = { showSizeFader = !showSizeFader },
+                    ) { Text(if (showSizeFader) "Size ✓" else "Size") }
+                }
                 TextButton(enabled = enabled, onClick = onOpenTools) {
                     Text(state.expandActionLabel)
                 }
@@ -202,16 +234,31 @@ internal fun ComparisonControlBar(
                 onValueChange = { onMixChange(it.coerceIn(0f, 1f)) },
             )
             CompactFaderRow(
-                label = "View",
-                valueLabel = String.format(Locale.getDefault(), "%.1f×", viewScale),
-                value = viewScale,
-                valueRange = 1f..6f,
+                label = "Frozen View",
+                valueLabel = String.format(Locale.getDefault(), "%.2f×", viewScale),
+                value = frozenZoomPosition(viewScale),
+                valueRange = 0f..1f,
                 enabled = enabled,
-                contentDescription = "Zoom frozen scene",
-                onValueChange = { onViewScaleChange(it.coerceIn(1f, 6f)) },
+                contentDescription = "Frozen View zoom, inspection only, 0.5 to 20 times",
+                onValueChange = { onViewScaleChange(frozenZoomScaleAt(it)) },
                 resetLabel = "1×",
                 onReset = onResetView,
             )
+            // The optional overlay size fader is a direct action, not a
+            // nearly full-screen inspector. View and overlay zoom stay separate.
+            if (showSizeFader && state.mode == OverlayUiMode.EditOverlay && state.isRepositionEnabled) {
+                CompactFaderRow(
+                    label = "Overlay",
+                    valueLabel = String.format(Locale.getDefault(), "%.2f×", overlayScale),
+                    value = overlayScale.coerceIn(0.5f, 2f),
+                    valueRange = 0.5f..2f,
+                    enabled = enabled,
+                    contentDescription = "Overlay size, changes the aligned image, 0.5 to 2 times",
+                    onValueChange = { onOverlayScaleChange(it.coerceIn(0.5f, 2f)) },
+                    resetLabel = "1×",
+                    onReset = onResetOverlayScale,
+                )
+            }
         }
     }
 }
@@ -271,13 +318,17 @@ internal fun RepositionModeToggle(
 ) {
     val title = if (repositionEnabled) "Position unlocked" else "Position frozen"
     val action = if (repositionEnabled) "Freeze" else "Reposition"
+    val haptic = LocalHapticFeedback.current
     Surface(
         modifier = modifier
             .semantics {
                 role = Role.Button
                 stateDescription = title
             }
-            .clickable(enabled = enabled, role = Role.Button, onClick = onToggle),
+            .clickable(enabled = enabled, role = Role.Button) {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onToggle()
+            },
         shape = MaterialTheme.shapes.extraLarge,
         color = if (repositionEnabled) {
             MaterialTheme.colorScheme.primaryContainer
@@ -353,8 +404,10 @@ internal fun OverlayToolsSheet(
     onDismissRequest: () -> Unit,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val maxHeight = (LocalConfiguration.current.screenHeightDp * 0.9f).dp
+    // Keep the camera alignment area visible: advanced tools are secondary.
+    // Partial expansion and scrolling preserve access on small phones.
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
+    val maxHeight = (LocalConfiguration.current.screenHeightDp * 0.52f).dp
 
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
@@ -506,11 +559,15 @@ internal fun EditOverlayPanel(
     onResetView: () -> Unit,
     onAutoAlign: () -> Unit,
     onStartPointFix: () -> Unit,
+    manualTransform: ManualOverlayTransform? = null,
+    manualBounds: ManualFaderBounds = ManualFaderBounds(256f, 256f),
+    onManualValue: (ManualAxis, Float) -> Unit = { _, _ -> },
 ) {
+    var showManual by remember { mutableStateOf(false) }
     Text("Fine adjustments", style = MaterialTheme.typography.titleSmall)
 
     AdjustmentSlider(
-        label = "Size",
+        label = "Overlay size",
         valueLabel = String.format(Locale.getDefault(), "%.2f×", scale),
         value = scale,
         valueRange = minScale..maxScale,
@@ -518,7 +575,7 @@ internal fun EditOverlayPanel(
         onValueChange = { onScaleChange(it.coerceIn(minScale, maxScale)) },
     )
     AdjustmentSlider(
-        label = "Rotation",
+        label = "Overlay rotation",
         valueLabel = String.format(Locale.getDefault(), "%.0f°", rotationDeg),
         value = rotationDeg.coerceIn(-180f, 180f),
         valueRange = -180f..180f,
@@ -534,6 +591,15 @@ internal fun EditOverlayPanel(
             onClick = onAutoAlign,
         ) { Text(if (autoAlignInProgress) "Matching…" else "Auto align") }
         OutlinedButton(enabled = enabled, onClick = onStartPointFix) { Text("Match points") }
+        if (manualTransform != null) {
+            OutlinedButton(enabled = enabled, onClick = { showManual = !showManual }) {
+                Text(if (showManual) "Hide manual adjust" else "Manual adjust XYZ")
+            }
+        }
+    }
+
+    if (showManual && manualTransform != null) {
+        ManualAdjustPanel(enabled, manualTransform, manualBounds, onManualValue)
     }
 
     autoAlignStatus?.let {
@@ -705,6 +771,218 @@ internal fun WorkflowCallout(
                 modifier = Modifier.widthIn(max = 560.dp),
                 style = MaterialTheme.typography.bodySmall,
             )
+        }
+    }
+}
+
+
+/**
+ * Edit-overlay Manual adjust, separate from the frozen View zoom.
+ *
+ * Slider thumb interactions have explicit end/cancel callbacks. Material3 Slider's
+ * onValueChangeFinished cannot distinguish release from pointer cancellation, so
+ * this custom track is used for relative wheels to guarantee commit-once.
+ */
+@Composable
+internal fun ManualAdjustPanel(
+    enabled: Boolean,
+    transform: ManualOverlayTransform,
+    bounds: ManualFaderBounds,
+    onAxisValue: (ManualAxis, Float) -> Unit,
+) {
+    Text("Manual adjust • image overlay", style = MaterialTheme.typography.titleSmall)
+    Text(
+        "X/Y are preview pixels (screen axes); Z is overlay size. " +
+            "Frozen View zoom is separate and does not change the saved image.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    ManualAxis.entries.forEach { axis ->
+        ManualAxisControl(
+            axis = axis,
+            committed = transform.value(axis),
+            bounds = bounds,
+            enabled = enabled,
+            onValue = { onAxisValue(axis, it) },
+        )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ManualAxisControl(
+    axis: ManualAxis,
+    committed: Float,
+    bounds: ManualFaderBounds,
+    enabled: Boolean,
+    onValue: (Float) -> Unit,
+) {
+    var mode by remember(axis) { mutableStateOf(ManualFaderMode.Value) }
+    var fader by remember(axis) { mutableStateOf(ManualFaderState(axis)) }
+    val latestCommitted by rememberUpdatedState(committed)
+    val latestOnValue by rememberUpdatedState(onValue)
+    val label = if (axis == ManualAxis.Z) {
+        String.format(Locale.getDefault(), "%.2f×", committed)
+    } else {
+        String.format(Locale.getDefault(), "%+.0f px", committed)
+    }
+    val deltaLabel = if (axis == ManualAxis.Z) {
+        String.format(Locale.getDefault(), "%+.3f×", fader.relativeDelta)
+    } else {
+        String.format(Locale.getDefault(), "%+.1f px", fader.relativeDelta)
+    }
+
+    fun cancel() {
+        if (!fader.active) return
+        val result = fader.cancel(latestCommitted, bounds)
+        fader = result.next
+        if (mode == ManualFaderMode.Value) latestOnValue(result.value)
+    }
+    fun start() { fader = fader.copy(mode = mode).begin(latestCommitted, bounds) }
+    fun move(position: Float) {
+        if (!fader.active) return
+        fader = fader.dragTo(position)
+        if (mode == ManualFaderMode.Value) latestOnValue(fader.previewValue(latestCommitted, bounds))
+    }
+    fun finish() {
+        if (!fader.active) return
+        val result = fader.release(latestCommitted, bounds)
+        fader = result.next // consume the release token before calling back
+        if (result.committed) latestOnValue(result.value)
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = axis.label,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.labelLarge,
+            )
+            Text(
+                text = if (mode == ManualFaderMode.Relative) label + "   Δ " + deltaLabel else label,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(0.dp),
+        ) {
+            FilterChip(
+                selected = mode == ManualFaderMode.Value,
+                enabled = enabled,
+                onClick = {
+                    cancel()
+                    mode = ManualFaderMode.Value
+                    fader = fader.switchTo(mode)
+                },
+                label = { Text("Value") },
+            )
+            FilterChip(
+                selected = mode == ManualFaderMode.Relative,
+                enabled = enabled,
+                onClick = {
+                    cancel()
+                    mode = ManualFaderMode.Relative
+                    fader = fader.switchTo(mode)
+                },
+                label = { Text("Step") },
+            )
+            TextButton(enabled = enabled, onClick = {
+                cancel()
+                latestOnValue(axis.baseline)
+            }) {
+                Text(if (axis == ManualAxis.Z) "1×" else "0")
+            }
+        }
+        Text(
+            text = if (mode == ManualFaderMode.Relative) "Wheel springs to zero; release applies a single step"
+            else "Wheel holds the absolute value on release",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        val position = if (fader.active) fader.position
+            else if (mode == ManualFaderMode.Value) axis.toPosition(committed, bounds)
+            else 0.5f
+        val primary = MaterialTheme.colorScheme.primary
+        val track = MaterialTheme.colorScheme.onSurfaceVariant
+        val description = axis.label + ", " + mode.name + ", " + label +
+            (if (mode == ManualFaderMode.Relative) ", pending " + deltaLabel else "")
+        val startCallback by rememberUpdatedState(::start)
+        val moveCallback by rememberUpdatedState(::move)
+        val finishCallback by rememberUpdatedState(::finish)
+        val cancelCallback by rememberUpdatedState(::cancel)
+        Canvas(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(44.dp)
+                .semantics {
+                    contentDescription = description
+                    stateDescription = if (mode == ManualFaderMode.Relative) {
+                        "Relative signed increment, committed on release"
+                    } else "Absolute value, retained on release"
+                    progressBarRangeInfo = ProgressBarRangeInfo(position, 0f..1f)
+                    setProgress { target ->
+                        if (!enabled) false
+                        else {
+                            startCallback()
+                            moveCallback(target)
+                            finishCallback()
+                            true
+                        }
+                    }
+                }
+                .pointerInput(enabled, axis, mode, bounds) {
+                    if (!enabled) return@pointerInput
+                    awaitEachGesture {
+                        var finished = false
+                        try {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            startCallback()
+                            down.consume() // keep horizontal adjustment independent of sheet scrolling
+                            val trackWidth = size.width.toFloat().coerceAtLeast(1f)
+                            moveCallback(down.position.x / trackWidth)
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                if (event.changes.count { it.pressed } > 1) break // multi-touch cancels, not commits
+                                if (change.isConsumed) break // parent scroll / gesture cancellation
+                                moveCallback(change.position.x / trackWidth)
+                                if (!change.pressed) {
+                                    finished = true
+                                    finishCallback()
+                                    break
+                                }
+                                change.consume()
+                            }
+                        } finally {
+                            if (!finished) cancelCallback()
+                        }
+                    }
+                },
+        ) {
+            val centerY = size.height / 2f
+            val margin = 11.dp.toPx()
+            val from = Offset(margin, centerY)
+            val to = Offset(size.width - margin, centerY)
+            drawLine(track, from, to, strokeWidth = 4.dp.toPx(), cap = StrokeCap.Round)
+            if (mode == ManualFaderMode.Relative) {
+                val centerX = size.width / 2f
+                drawLine(primary.copy(alpha = 0.6f),
+                    Offset(centerX, centerY - 10.dp.toPx()),
+                    Offset(centerX, centerY + 10.dp.toPx()),
+                    strokeWidth = 2.dp.toPx())
+            }
+            val x = margin + (size.width - margin * 2f) * position.coerceIn(0f, 1f)
+            drawCircle(primary, radius = 10.dp.toPx(), center = Offset(x, centerY))
         }
     }
 }

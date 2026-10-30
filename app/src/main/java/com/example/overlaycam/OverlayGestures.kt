@@ -65,16 +65,21 @@ internal fun zoomViewportAround(
     zoom: Float,
     centroid: Offset,
     viewportCenter: Offset,
-    minScale: Float = 1f,
-    maxScale: Float = 6f,
+    minScale: Float = MIN_FROZEN_VIEW_SCALE,
+    maxScale: Float = MAX_FROZEN_VIEW_SCALE,
 ): ViewportTransform {
-    val nextScale = (currentScale * zoom).coerceIn(minScale, maxScale)
-    if (currentScale <= 0f || nextScale == currentScale) {
-        return ViewportTransform(nextScale, currentOffset)
-    }
-    val ratio = nextScale / currentScale
-    val relativeCentroid = centroid - viewportCenter
-    val nextOffset = relativeCentroid * (1f - ratio) + currentOffset * ratio
+    val safeScale = currentScale.takeIf { it.isFinite() && it > 0f }?.coerceIn(minScale, maxScale) ?: 1f
+    val safeZoom = zoom.takeIf { it.isFinite() && it > 0f } ?: 1f
+    val nextScale = (safeScale.toDouble() * safeZoom).coerceIn(minScale.toDouble(), maxScale.toDouble()).toFloat()
+    fun clean(value: Float): Float = if (value.isFinite()) value.coerceIn(-1000000f, 1000000f) else 0f
+    val safeOffset = Offset(clean(currentOffset.x), clean(currentOffset.y))
+    if (nextScale == safeScale) return ViewportTransform(nextScale, safeOffset)
+    val ratio = nextScale / safeScale
+    val center = Offset(clean(centroid.x - viewportCenter.x), clean(centroid.y - viewportCenter.y))
+    val nextOffset = Offset(
+        clean(center.x * (1f - ratio) + safeOffset.x * ratio),
+        clean(center.y * (1f - ratio) + safeOffset.y * ratio),
+    )
     return ViewportTransform(nextScale, nextOffset)
 }
 

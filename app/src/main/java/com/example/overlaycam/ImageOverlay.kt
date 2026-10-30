@@ -11,6 +11,7 @@ import android.graphics.ColorMatrixColorFilter
 import android.graphics.ImageDecoder
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
@@ -27,13 +28,24 @@ import androidx.compose.foundation.gestures.TransformableState
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -41,13 +53,17 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
@@ -67,6 +83,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
@@ -80,7 +97,12 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.lifecycle.viewmodel.compose.viewModel
+import coil.compose.AsyncImage
+import androidx.compose.ui.text.style.TextOverflow
+import java.io.File
+import java.io.FileOutputStream
 import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
 @Composable
@@ -144,11 +166,54 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
         var heatmapSimilarityThreshold by editor.heatmapSimilarityThreshold
         var heatmapPalette by editor.heatmapPalette
 
+        var streamingEffects by editor.streamingEffects
+        var pictureInPictureBitmap by editor.pictureInPictureBitmap
+        var logoBitmap by editor.logoBitmap
+        var keyedPictureInPictureBitmap by remember { mutableStateOf<Bitmap?>(null) }
+        var keyedLogoBitmap by remember { mutableStateOf<Bitmap?>(null) }
+        var customTypeface by remember { mutableStateOf<Typeface?>(null) }
+        var effectAnimationPhase by remember { mutableFloatStateOf(0f) }
+
+        val presetStore = remember(context) { EffectPresetStore(context) }
+        var presetName by remember { mutableStateOf(presetStore.lastPresetName() ?: "default") }
+        var presetNames by remember { mutableStateOf(presetStore.names()) }
+        val mjpegServer = remember { MjpegStreamServer() }
+        var outputPortText by remember { mutableStateOf(streamingEffects.output.port.toString()) }
+        var streamStatus by remember { mutableStateOf(context.getString(R.string.fx_mjpeg_off)) }
+
+        val obsClient = remember { ObsWebSocketClient() }
+        var obsHost by remember { mutableStateOf("") }
+        var obsPort by remember { mutableStateOf("4455") }
+        var obsPassword by remember { mutableStateOf("") }
+        var obsScene by remember { mutableStateOf("") }
+        var obsSecure by remember { mutableStateOf(false) }
+        var obsStatus by remember { mutableStateOf(context.getString(R.string.obs_status_disconnected)) }
+        var obsState by remember { mutableStateOf(ObsConnectionState.Disconnected) }
+
         var autoAlignInProgress by remember { mutableStateOf(false) }
         var autoAlignStatus by remember { mutableStateOf<String?>(null) }
         var gestureOperation by remember { mutableStateOf(OverlayGestureOperation.Idle) }
 
         var pickerTarget by remember { mutableStateOf(PickerTarget.Overlay) }
+
+        val recentStore = remember(context) { RecentSceneStore(context) }
+        var recentScenes by remember { mutableStateOf(recentStore.list()) }
+        var currentFrozenUri by remember { mutableStateOf<Uri?>(null) }
+        var currentOverlaySourceUri by remember { mutableStateOf<Uri?>(null) }
+        // Invalidates slow asynchronous recent restores when the user changes
+        // scene, freezes again, or returns to the live camera.
+        var reopenGeneration by remember { mutableIntStateOf(0) }
+        var showRecent by remember { mutableStateOf(false) }
+        var recentLoadInProgress by remember { mutableStateOf(false) }
+        var showRestartConfirm by remember { mutableStateOf(false) }
+        var showCameraGrid by remember { mutableStateOf(true) }
+        var showChrome by remember { mutableStateOf(true) }
+
+        fun rememberRecent(background: Uri?, overlay: Uri?, label: String) {
+            if (background != null) {
+                recentScenes = recentStore.record(background.toString(), overlay?.toString(), label)
+            }
+        }
 
         fun clearOverlayBitmaps() {
             listOfNotNull(
@@ -160,6 +225,7 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
             }
             overlayBitmap = null
             overlayUri = null
+            currentOverlaySourceUri = null
             lockedLayerA = null
             lockedLayerB = null
             guidanceBitmap?.takeUnless(Bitmap::isRecycled)?.recycle()
@@ -173,6 +239,16 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
         DisposableEffect(Unit) {
             onDispose {
                 guidanceBitmap?.takeUnless(Bitmap::isRecycled)?.recycle()
+                keyedPictureInPictureBitmap
+                    ?.takeIf { it !== pictureInPictureBitmap }
+                    ?.takeUnless(Bitmap::isRecycled)
+                    ?.recycle()
+                keyedLogoBitmap
+                    ?.takeIf { it !== logoBitmap }
+                    ?.takeUnless(Bitmap::isRecycled)
+                    ?.recycle()
+                mjpegServer.stop()
+                obsClient.disconnect()
             }
         }
 
@@ -238,12 +314,53 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
             decodeBitmapForEditor(context, it)
         }
 
+        fun persistReadPermission(uri: Uri) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }
+        }
+
+        fun applyPickedImageUri(uri: Uri) {
+            persistReadPermission(uri)
+            when (pickerTarget) {
+                PickerTarget.Background -> {
+                    reopenGeneration += 1
+                    recentLoadInProgress = false
+                    backgroundUri = uri
+                }
+                PickerTarget.Overlay -> {
+                    reopenGeneration += 1
+                    recentLoadInProgress = false
+                    overlayUri = uri
+                }
+                PickerTarget.PictureInPicture -> {
+                    persistReadPermission(uri)
+                    streamingEffects = streamingEffects.copy(
+                        pictureInPicture = streamingEffects.pictureInPicture.copy(
+                            enabled = true,
+                            imageUri = uri.toString(),
+                        ),
+                    )
+                }
+                PickerTarget.Logo -> {
+                    persistReadPermission(uri)
+                    streamingEffects = streamingEffects.copy(
+                        logo = streamingEffects.logo.copy(
+                            enabled = true,
+                            imageUri = uri.toString(),
+                        ),
+                    )
+                }
+            }
+        }
+
         val photoPickerLauncher =
             if (Build.VERSION.SDK_INT >= 33) {
                 rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-                    uri?.let {
-                        if (pickerTarget == PickerTarget.Background) backgroundUri = it else overlayUri = it
-                    }
+                    uri?.let(::applyPickedImageUri)
                 }
             } else null
 
@@ -272,10 +389,24 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                             // Some document providers grant only temporary access. The current
                             // editor session can still use the returned URI safely.
                         }
-                        if (pickerTarget == PickerTarget.Background) backgroundUri = it else overlayUri = it
+                        applyPickedImageUri(it)
                     }
                 }
             } else null
+
+        val fontPickerLauncher = rememberLauncherForActivityResult(
+            ActivityResultContracts.OpenDocument(),
+        ) { uri ->
+            uri?.let {
+                persistReadPermission(it)
+                streamingEffects = streamingEffects.copy(
+                    text = streamingEffects.text.copy(
+                        font = TextOverlayFont.Custom,
+                        customFontUri = it.toString(),
+                    ),
+                )
+            }
+        }
 
         fun launchImagePicker(target: PickerTarget) {
             pickerTarget = target
@@ -288,13 +419,27 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
             }
         }
 
+        fun launchFontPicker() {
+            fontPickerLauncher.launch(
+                arrayOf(
+                    "font/ttf",
+                    "font/otf",
+                    "application/x-font-ttf",
+                    "application/vnd.ms-opentype",
+                    "application/octet-stream",
+                ),
+            )
+        }
+
         LaunchedEffect(backgroundUri) {
             val uri = backgroundUri ?: return@LaunchedEffect
             backgroundLoadInProgress = true
             try {
                 val bmp = loadBitmap(uri)
                 if (bmp == null) {
-                    snackbarHostState.showSnackbar("Could not load that background image")
+                    // Revert selection without mutating the previous frozen bitmap.
+                    backgroundUri = null
+                    snackbarHostState.showSnackbar("Cannot open background; it may have moved or access was revoked")
                     return@LaunchedEffect
                 }
                 backgroundBitmap?.recycle()
@@ -304,6 +449,8 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                 hideAllOverlays = false
                 addOverlayPending = false
                 resetWorkingOverlayTransform(clearPoints = true)
+                currentFrozenUri = uri
+                rememberRecent(uri, null, "Background photo")
             } finally {
                 backgroundLoadInProgress = false
             }
@@ -315,13 +462,115 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
             try {
                 val bmp = loadBitmap(uri)
                 if (bmp == null) {
-                    snackbarHostState.showSnackbar("Could not load that overlay image")
+                    overlayUri = null
+                    snackbarHostState.showSnackbar("Could not load overlay; previous image is unchanged")
                     return@LaunchedEffect
                 }
                 overlayBitmap?.takeUnless(Bitmap::isRecycled)?.recycle()
                 overlayBitmap = bmp
+                currentOverlaySourceUri = uri
+                rememberRecent(
+                    currentFrozenUri ?: backgroundUri,
+                    uri,
+                    if (backgroundUri == null) "Camera + overlay" else "Photo + overlay",
+                )
             } finally {
                 overlayLoadInProgress = false
+            }
+        }
+
+        LaunchedEffect(streamingEffects.pictureInPicture.imageUri) {
+            val uri = streamingEffects.pictureInPicture.imageUri?.let(Uri::parse)
+            val next = loadBitmap(uri)
+            keyedPictureInPictureBitmap
+                ?.takeIf { it !== pictureInPictureBitmap }
+                ?.takeUnless(Bitmap::isRecycled)
+                ?.recycle()
+            keyedPictureInPictureBitmap = null
+            pictureInPictureBitmap?.takeUnless(Bitmap::isRecycled)?.recycle()
+            pictureInPictureBitmap = next
+        }
+
+        LaunchedEffect(streamingEffects.logo.imageUri) {
+            val uri = streamingEffects.logo.imageUri?.let(Uri::parse)
+            val next = loadBitmap(uri)
+            keyedLogoBitmap
+                ?.takeIf { it !== logoBitmap }
+                ?.takeUnless(Bitmap::isRecycled)
+                ?.recycle()
+            keyedLogoBitmap = null
+            logoBitmap?.takeUnless(Bitmap::isRecycled)?.recycle()
+            logoBitmap = next
+        }
+
+        LaunchedEffect(
+            pictureInPictureBitmap,
+            streamingEffects.chromaKey,
+        ) {
+            val source = pictureInPictureBitmap
+            val shouldKey = streamingEffects.chromaKey.enabled &&
+                streamingEffects.chromaKey.target in setOf(
+                    ChromaTarget.PictureInPicture,
+                    ChromaTarget.Both,
+                )
+            val next = if (source != null && shouldKey) {
+                withContext(Dispatchers.Default) {
+                    chromaKeyCopy(source, streamingEffects.chromaKey)
+                }
+            } else {
+                source
+            }
+            keyedPictureInPictureBitmap
+                ?.takeIf { it !== source && it !== next }
+                ?.takeUnless(Bitmap::isRecycled)
+                ?.recycle()
+            keyedPictureInPictureBitmap = next
+        }
+
+        LaunchedEffect(
+            logoBitmap,
+            streamingEffects.chromaKey,
+        ) {
+            val source = logoBitmap
+            val shouldKey = streamingEffects.chromaKey.enabled &&
+                streamingEffects.chromaKey.target in setOf(
+                    ChromaTarget.Logo,
+                    ChromaTarget.Both,
+                )
+            val next = if (source != null && shouldKey) {
+                withContext(Dispatchers.Default) {
+                    chromaKeyCopy(source, streamingEffects.chromaKey)
+                }
+            } else {
+                source
+            }
+            keyedLogoBitmap
+                ?.takeIf { it !== source && it !== next }
+                ?.takeUnless(Bitmap::isRecycled)
+                ?.recycle()
+            keyedLogoBitmap = next
+        }
+
+        LaunchedEffect(streamingEffects.text.customFontUri) {
+            customTypeface = streamingEffects.text.customFontUri
+                ?.let(Uri::parse)
+                ?.let { loadTypefaceFromUri(context, it) }
+        }
+
+        LaunchedEffect(
+            streamingEffects.text.enabled,
+            streamingEffects.text.animation,
+        ) {
+            if (
+                !streamingEffects.text.enabled ||
+                streamingEffects.text.animation == TextOverlayAnimation.None
+            ) {
+                effectAnimationPhase = 0f
+                return@LaunchedEffect
+            }
+            while (true) {
+                effectAnimationPhase = (effectAnimationPhase + 0.0165f) % 1f
+                delay(33)
             }
         }
 
@@ -336,6 +585,84 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
             if (hideAllOverlays) null else lockedLayerB,
             currentWorkingLayerOrNull()?.takeIf { !overlayFixedMode || addOverlayPending }
         )
+
+        val latestStreamingEffects by rememberUpdatedState(streamingEffects)
+        val latestStreamingLayers by rememberUpdatedState(visibleLayersForEffects)
+        val latestStreamingBackground by rememberUpdatedState(backgroundBitmap)
+        val latestStreamingHandle by rememberUpdatedState(handle)
+        val latestStreamingPreviewSize by rememberUpdatedState(previewSize)
+        val latestStreamingOpacity by rememberUpdatedState(opacity)
+        val latestStreamingFlip by rememberUpdatedState(flipOverlayAndBackground)
+        val latestStreamingBackgroundOpacity by rememberUpdatedState(frozenOverlayOpacity)
+        val latestStreamingPictureInPicture by rememberUpdatedState(keyedPictureInPictureBitmap)
+        val latestStreamingLogo by rememberUpdatedState(keyedLogoBitmap)
+        val latestStreamingTypeface by rememberUpdatedState(customTypeface)
+        val latestStreamingAnimationPhase by rememberUpdatedState(effectAnimationPhase)
+
+        LaunchedEffect(
+            streamingEffects.output.enabled,
+            streamingEffects.output.port,
+        ) {
+            if (!streamingEffects.output.enabled) {
+                mjpegServer.stop()
+                streamStatus = context.getString(R.string.fx_mjpeg_off)
+                return@LaunchedEffect
+            }
+
+            try {
+                mjpegServer.start(streamingEffects.output.port)
+                streamStatus = context.getString(R.string.fx_mjpeg_serving, mjpegServer.urlHint())
+                while (true) {
+                    val effects = latestStreamingEffects
+                    val source = latestStreamingBackground ?: latestStreamingHandle?.captureFrame?.invoke()
+                    val size = latestStreamingPreviewSize
+                    if (source != null && size.width > 1 && size.height > 1) {
+                        val ownsSource = source !== latestStreamingBackground
+                        withContext(Dispatchers.Default) {
+                            val scaledSource = scaleBitmapToMaxEdge(source, effects.output.maxEdge)
+                            val base = composeLayers(
+                                camBitmap = scaledSource,
+                                previewSize = size,
+                                layers = latestStreamingLayers,
+                                variant = EffectVariant.Normal,
+                                comparisonMix = latestStreamingOpacity,
+                                flipOverlayAndBackground = latestStreamingFlip,
+                                frozenOverlayOpacity = latestStreamingBackgroundOpacity,
+                                heatmapSimilarityThreshold = heatmapSimilarityThreshold,
+                                heatmapPalette = heatmapPalette,
+                            )
+                            if (scaledSource !== source && !scaledSource.isRecycled) {
+                                scaledSource.recycle()
+                            }
+                            val decorated = renderStreamingEffects(
+                                base = base,
+                                pictureInPicture = latestStreamingPictureInPicture,
+                                logo = latestStreamingLogo,
+                                state = effects,
+                                customTypeface = latestStreamingTypeface,
+                                animationPhase = latestStreamingAnimationPhase,
+                            )
+                            base.recycle()
+                            mjpegServer.updateFrame(decorated, effects.output.jpegQuality)
+                            decorated.recycle()
+                        }
+                        if (ownsSource && !source.isRecycled) source.recycle()
+                    }
+                    val frameDelay = (1000L / latestStreamingEffects.output.maxFps.coerceAtLeast(1))
+                        .coerceAtLeast(16L)
+                    delay(frameDelay)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                streamStatus = context.getString(
+                    R.string.fx_mjpeg_failed,
+                    error.message ?: context.getString(R.string.fx_unknown_error),
+                )
+            } finally {
+                mjpegServer.stop()
+            }
+        }
 
         LaunchedEffect(
             variant,
@@ -428,6 +755,7 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
 
         var showTools by remember { mutableStateOf(false) }
         val busyLabel = when {
+            recentLoadInProgress -> "Opening recent…"
             saveInProgress -> "Saving image…"
             backgroundLoadInProgress -> "Loading background…"
             overlayLoadInProgress -> "Loading overlay…"
@@ -457,12 +785,57 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
         }
 
         fun freezeCameraBackground(successMessage: String = "Background frozen") {
+            reopenGeneration += 1
+            recentLoadInProgress = false
             val bmp = handle?.captureFrame?.invoke()
             if (bmp != null) {
                 backgroundBitmap?.recycle()
                 backgroundBitmap = bmp
+                backgroundUri = null
+                currentFrozenUri = null
                 resetViewport()
+                showRecent = false
                 showTools = false
+                // A copied bitmap makes saving the recent frame safe even when the
+                // editor switches scenes before the IO dispatcher finishes.
+                val archiveCopy = runCatching {
+                    bmp.copy(Bitmap.Config.ARGB_8888, false)
+                }.getOrNull()
+                if (archiveCopy != null) {
+                    coroutineScope.launch {
+                        val archivedUri = withContext(Dispatchers.IO) {
+                            try {
+                                val folder = File(context.filesDir, "recent-freezes")
+                                if (!folder.exists() && !folder.mkdirs()) return@withContext null
+                                val file = File.createTempFile("frame_", ".jpg", folder)
+                                FileOutputStream(file).use { stream ->
+                                    if (!archiveCopy.compress(Bitmap.CompressFormat.JPEG, 92, stream)) {
+                                        file.delete()
+                                        return@withContext null
+                                    }
+                                }
+                                Uri.fromFile(file)
+                            } catch (_: Exception) {
+                                null
+                            } finally {
+                                archiveCopy.recycle()
+                            }
+                        }
+                        archivedUri?.let { uri ->
+                            if (backgroundBitmap === bmp) {
+                                currentFrozenUri = uri
+                                val overlay = currentOverlaySourceUri
+                                recentScenes = recentStore.record(
+                                    uri.toString(),
+                                    overlay?.toString(),
+                                    if (overlay != null) "Camera + overlay" else "Camera freeze",
+                                )
+                            } else {
+                                recentScenes = recentStore.record(uri.toString(), null, "Camera freeze")
+                            }
+                        }
+                    }
+                }
                 coroutineScope.launch { snackbarHostState.showSnackbar(successMessage) }
             } else {
                 coroutineScope.launch { snackbarHostState.showSnackbar("Camera is still starting") }
@@ -470,19 +843,121 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
         }
 
         fun returnToLiveCamera() {
+            reopenGeneration += 1
+            recentLoadInProgress = false
             backgroundBitmap?.recycle()
             backgroundBitmap = null
             backgroundUri = null
+            currentFrozenUri = null
             overlayFixedMode = false
             clearOverlayBitmaps()
             hideAllOverlays = false
             addOverlayPending = false
             resetWorkingOverlayTransform(clearPoints = true)
+            showRecent = false
+            showRestartConfirm = false
+            showChrome = true
             showTools = false
+        }
+
+        fun reopenRecent(scene: RecentScene) {
+            val nextBackground = Uri.parse(scene.backgroundUri)
+            val nextOverlay = scene.overlayUri?.let(Uri::parse)
+            val sameScene = scene.backgroundUri ==
+                (currentFrozenUri ?: backgroundUri)?.toString() &&
+                scene.overlayUri == currentOverlaySourceUri?.toString()
+            showRecent = false
+            showTools = false
+            showChrome = true
+            if (sameScene && scene.alignment == null) return
+
+            reopenGeneration += 1
+            val request = reopenGeneration
+            coroutineScope.launch {
+                recentLoadInProgress = true
+                try {
+                    // Transactional reopen: decode both images before mutating the
+                    // editor. A missing photo or revoked overlay URI cannot erase
+                    // the active composition.
+                    val nextBitmap = loadBitmap(nextBackground)
+                    if (request != reopenGeneration) {
+                        nextBitmap?.recycle()
+                        return@launch
+                    }
+                    if (nextBitmap == null) {
+                        snackbarHostState.showSnackbar("Recent background is unavailable or access was revoked")
+                        return@launch
+                    }
+                    val nextOverlayBitmap = if (nextOverlay != null) loadBitmap(nextOverlay) else null
+                    if (request != reopenGeneration) {
+                        nextBitmap.recycle()
+                        nextOverlayBitmap?.recycle()
+                        return@launch
+                    }
+                    if (nextOverlay != null && nextOverlayBitmap == null) {
+                        nextBitmap.recycle()
+                        snackbarHostState.showSnackbar("Recent overlay is unavailable; current scene kept")
+                        return@launch
+                    }
+                    clearOverlayBitmaps()
+                    backgroundBitmap?.takeUnless(Bitmap::isRecycled)?.recycle()
+                    backgroundBitmap = nextBitmap
+                    backgroundUri = null
+                    currentFrozenUri = nextBackground
+                    overlayUri = null
+                    currentOverlaySourceUri = nextOverlay
+                    overlayFixedMode = false
+                    hideAllOverlays = false
+                    addOverlayPending = false
+                    resetWorkingOverlayTransform(clearPoints = true)
+                    val fixed = scene.alignment?.normalized()
+                    if (fixed != null && nextOverlayBitmap != null) {
+                        lockedLayerA = OverlayLayer(
+                            bitmap = nextOverlayBitmap,
+                            opacity = 1f,
+                            scale = fixed.scale,
+                            rotation = fixed.rotation,
+                            offsetX = fixed.offsetX,
+                            offsetY = fixed.offsetY,
+                            fixedPoints = emptyList(),
+                        )
+                        overlayBitmap = null
+                        overlayFixedMode = true
+                        repositionEnabled = false
+                        opacity = fixed.blend
+                    } else {
+                        overlayBitmap = nextOverlayBitmap
+                    }
+                    recentScenes = recentStore.record(
+                        scene.backgroundUri,
+                        scene.overlayUri,
+                        scene.label,
+                        alignment = fixed,
+                    )
+                } finally {
+                    if (request == reopenGeneration) recentLoadInProgress = false
+                }
+            }
         }
 
         fun lockWorkingOverlay() {
             val working = currentWorkingLayerOrNull() ?: return
+            val recentBackground = currentFrozenUri ?: backgroundUri
+            val recentOverlay = currentOverlaySourceUri
+            if (recentBackground != null && recentOverlay != null) {
+                recentScenes = recentStore.record(
+                    recentBackground.toString(),
+                    recentOverlay.toString(),
+                    "Frozen overlay alignment",
+                    RecentAlignment(
+                        scale = working.scale,
+                        rotation = working.rotation,
+                        offsetX = working.offsetX,
+                        offsetY = working.offsetY,
+                        blend = opacity,
+                    ),
+                )
+            }
             if (lockedLayerA == null) lockedLayerA = working else lockedLayerB = working
             overlayBitmap = null
             overlayUri = null
@@ -552,6 +1027,11 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                             frozenOverlayOpacity = frozenOverlayOpacity,
                             heatmapSimilarityThreshold = heatmapSimilarityThreshold,
                             heatmapPalette = heatmapPalette,
+                            streamingEffects = streamingEffects,
+                            pictureInPicture = keyedPictureInPictureBitmap,
+                            logo = keyedLogoBitmap,
+                            customTypeface = customTypeface,
+                            animationPhase = effectAnimationPhase,
                         )
                         saveInProgress = false
                         snackbarHostState.showSnackbar(result.message)
@@ -565,6 +1045,32 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                 retrySaveAfterPermission = false
                 saveCurrentComposite()
             }
+        }
+
+        fun goBackOneStage() {
+            when (editorBackActionFor(uiState.mode)) {
+                EditorBackAction.None -> Unit
+                EditorBackAction.ConfirmNewCamera -> showRestartConfirm = true
+                EditorBackAction.RemoveWorkingOverlay -> {
+                    clearOverlayBitmaps()
+                    overlayFixedMode = false
+                    resetWorkingOverlayTransform()
+                }
+                EditorBackAction.ExitPointMatch -> {
+                    pointFixMode = false
+                    pointFixZoom = 1f
+                }
+                EditorBackAction.UnlockOverlay -> reopenLatestOverlayForEditing()
+            }
+            showRecent = false
+            showTools = false
+        }
+
+        BackHandler(enabled = showRecent && !showTools) {
+            showRecent = false
+        }
+        BackHandler(enabled = hasStillBackground && !showTools && !showRecent && !pointFixMode) {
+            goBackOneStage()
         }
 
         fun runRecommendedAction() {
@@ -638,6 +1144,27 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                                 text = "Choose a background photo to begin",
                                 style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+
+                if (!hasStillBackground && showCameraGrid) {
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        val gridColor = Color.White.copy(alpha = 0.42f)
+                        val lineWidth = 1.dp.toPx()
+                        for (fraction in listOf(1f / 3f, 2f / 3f)) {
+                            drawLine(
+                                gridColor,
+                                Offset(size.width * fraction, 0f),
+                                Offset(size.width * fraction, size.height),
+                                strokeWidth = lineWidth,
+                            )
+                            drawLine(
+                                gridColor,
+                                Offset(0f, size.height * fraction),
+                                Offset(size.width, size.height * fraction),
+                                strokeWidth = lineWidth,
                             )
                         }
                     }
@@ -818,6 +1345,14 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                             colorFilter = if (variant == EffectVariant.BackgroundInverted) invertComposeColorFilter() else null
                         )
                     }
+
+                    drawStreamingEffects(
+                        pictureInPicture = keyedPictureInPictureBitmap,
+                        logo = keyedLogoBitmap,
+                        state = streamingEffects,
+                        customTypeface = customTypeface,
+                        animationPhase = effectAnimationPhase,
+                    )
                 }
 
                 if (pointFixMode) {
@@ -841,6 +1376,145 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
 
             }
 
+            // Camera-style small top rail; it never demands the full viewport.
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .statusBarsPadding()
+                    .padding(start = 6.dp, top = 4.dp),
+                shape = MaterialTheme.shapes.extraLarge,
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.83f),
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(0.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (!showChrome) {
+                        TextButton(onClick = { showChrome = true }) { Text(stringResource(R.string.rail_controls)) }
+                    } else {
+                        if (hasStillBackground) {
+                            TextButton(onClick = { goBackOneStage() }) { Text(stringResource(R.string.rail_back)) }
+                        }
+                        TextButton(onClick = {
+                            showRecent = !showRecent
+                            showTools = false
+                        }) { Text(stringResource(R.string.rail_recent)) }
+                        if (!hasStillBackground) {
+                            val gridState = stringResource(
+                                if (showCameraGrid) R.string.rail_grid_state_on else R.string.rail_grid_state_off,
+                            )
+                            TextButton(
+                                onClick = { showCameraGrid = !showCameraGrid },
+                                modifier = Modifier.semantics { stateDescription = gridState },
+                            ) {
+                                Text(stringResource(if (showCameraGrid) R.string.rail_grid_on else R.string.rail_grid))
+                            }
+                        } else {
+                            TextButton(onClick = {
+                                if (needsRestartConfirmation(uiState)) showRestartConfirm = true
+                                else returnToLiveCamera()
+                            }) { Text(stringResource(R.string.rail_new)) }
+                        }
+                        TextButton(onClick = {
+                            showChrome = false
+                            showRecent = false
+                        }) { Text(stringResource(R.string.rail_hide)) }
+                    }
+                }
+            }
+
+            if (showRecent && showChrome) {
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .statusBarsPadding()
+                        .padding(top = 60.dp, start = 12.dp, end = 12.dp)
+                        .widthIn(min = 220.dp, max = 320.dp)
+                        .heightIn(max = 252.dp),
+                    shape = MaterialTheme.shapes.large,
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.97f),
+                    shadowElevation = 8.dp,
+                ) {
+                    Column(
+                        modifier = Modifier.verticalScroll(rememberScrollState()).padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(stringResource(R.string.recent_title), style = MaterialTheme.typography.titleSmall)
+                        if (recentScenes.isEmpty()) {
+                            Text(stringResource(R.string.recent_empty), style = MaterialTheme.typography.bodySmall)
+                        }
+                        val activeBackground = (currentFrozenUri ?: backgroundUri)?.toString()
+                        recentScenes.take(12).forEach { scene ->
+                            val isCurrent = activeBackground == scene.backgroundUri &&
+                                (currentOverlaySourceUri?.toString() == scene.overlayUri)
+                            val overlayName = scene.overlayUri?.let {
+                                Uri.parse(it).lastPathSegment?.takeLast(26)
+                            }
+                            TextButton(
+                                onClick = { reopenRecent(scene) },
+                                modifier = Modifier.fillMaxWidth(),
+                                enabled = busyLabel == null,
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    AsyncImage(
+                                        model = Uri.parse(scene.backgroundUri),
+                                        contentDescription = null,
+                                        modifier = Modifier
+                                            .size(48.dp)
+                                            .clip(MaterialTheme.shapes.small),
+                                        contentScale = ContentScale.Crop,
+                                    )
+                                    if (scene.overlayUri != null) {
+                                        AsyncImage(
+                                            model = Uri.parse(scene.overlayUri),
+                                            contentDescription = null,
+                                            modifier = Modifier
+                                                .size(32.dp)
+                                                .clip(MaterialTheme.shapes.small),
+                                            contentScale = ContentScale.Crop,
+                                        )
+                                    }
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            (if (isCurrent) "● " else "") + scene.label,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        val time = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
+                                            .format(Date(scene.lastUsedAt))
+                                        Text(
+                                            (if (scene.alignment != null) "● aligned · " else "") +
+                                                (overlayName?.let { "↳ $it · " } ?: "") + time,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        TextButton(onClick = { showRecent = false }) { Text(stringResource(R.string.recent_close)) }
+                    }
+                }
+            }
+
+            if (showRestartConfirm) {
+                AlertDialog(
+                    onDismissRequest = { showRestartConfirm = false },
+                    title = { Text(stringResource(R.string.restart_title)) },
+                    text = { Text(stringResource(R.string.restart_message)) },
+                    confirmButton = {
+                        TextButton(onClick = { returnToLiveCamera() }) { Text(stringResource(R.string.restart_confirm)) }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showRestartConfirm = false }) { Text(stringResource(R.string.restart_cancel)) }
+                    },
+                )
+            }
+
             AnimatedVisibility(
                 visible = gestureOperation != OverlayGestureOperation.Idle,
                 modifier = Modifier
@@ -852,7 +1526,7 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
             }
 
             AnimatedVisibility(
-                visible = uiState.showComparisonControls && !showTools,
+                visible = uiState.showComparisonControls && !showTools && showChrome,
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
                     .padding(end = 12.dp),
@@ -874,7 +1548,7 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
             }
 
             AnimatedVisibility(
-                visible = !showTools,
+                visible = !showTools && showChrome,
                 modifier = Modifier.align(Alignment.BottomCenter),
             ) {
                 Column(
@@ -887,12 +1561,15 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                             busyLabel = busyLabel,
                             mix = opacity,
                             viewScale = viewportScale,
+                            overlayScale = scaleF,
                             variant = variant,
                             availableVariants = variants.filter(EffectVariant::showInComparisonBar),
                             enabled = busyLabel == null,
                             onMixChange = { opacity = it },
-                            onViewScaleChange = { viewportScale = it },
+                            onViewScaleChange = { viewportScale = boundedFrozenViewScale(it) },
                             onResetView = { resetViewport() },
+                            onOverlayScaleChange = { scaleF = it.coerceIn(minScale, maxScale) },
+                            onResetOverlayScale = { scaleF = 1f },
                             onVariantChange = { selected ->
                                 variantIndex = variants.indexOf(selected)
                             },
@@ -908,7 +1585,7 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                             },
                             viewScale = viewportScale,
                             showViewFader = uiState.canInspectFrozenScene,
-                            onViewScaleChange = { viewportScale = it },
+                            onViewScaleChange = { viewportScale = boundedFrozenViewScale(it) },
                             onResetView = { resetViewport() },
                             onRecommendedAction = { runRecommendedAction() },
                             onOpenTools = { showTools = true },
@@ -964,6 +1641,24 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                             autoAlignStatus = autoAlignStatus,
                             onScaleChange = { scaleF = it },
                             onRotationChange = { rotationDeg = it },
+                            manualTransform = ManualOverlayTransform(offsetX, offsetY, scaleF),
+                            manualBounds = ManualFaderBounds(
+                                previewSize.width.toFloat(),
+                                previewSize.height.toFloat(),
+                            ),
+                            onManualValue = { axis, value ->
+                                val next = ManualOverlayTransform(offsetX, offsetY, scaleF).withValue(
+                                    axis = axis,
+                                    proposed = value,
+                                    bounds = ManualFaderBounds(
+                                        previewSize.width.toFloat(),
+                                        previewSize.height.toFloat(),
+                                    ),
+                                )
+                                offsetX = next.x
+                                offsetY = next.y
+                                scaleF = next.z
+                            },
                             onReset = {
                                 resetWorkingOverlayTransform(clearPoints = true)
                                 hideAllOverlays = false
@@ -1059,6 +1754,113 @@ fun OverlayScreen(modifier: Modifier = Modifier) {
                             onResetView = { resetViewport() },
                         )
                     }
+
+                    StreamingEffectsPanel(
+                        state = streamingEffects,
+                        outputPortText = outputPortText,
+                        streamStatus = streamStatus,
+                        presetName = presetName,
+                        presetNames = presetNames,
+                        obsHost = obsHost,
+                        obsPort = obsPort,
+                        obsPassword = obsPassword,
+                        obsScene = obsScene,
+                        obsSecure = obsSecure,
+                        obsStatus = obsStatus,
+                        obsState = obsState,
+                        onStateChange = { streamingEffects = it.normalized() },
+                        onOutputPortTextChange = { input ->
+                            val digits = input.filter(Char::isDigit).take(5)
+                            outputPortText = digits
+                            digits.toIntOrNull()
+                                ?.takeIf { it in 1024..65535 }
+                                ?.let { port ->
+                                    streamingEffects = streamingEffects.copy(
+                                        output = streamingEffects.output.copy(port = port),
+                                    )
+                                }
+                        },
+                        onPickPictureInPicture = {
+                            showTools = false
+                            launchImagePicker(PickerTarget.PictureInPicture)
+                        },
+                        onPickLogo = {
+                            showTools = false
+                            launchImagePicker(PickerTarget.Logo)
+                        },
+                        onPickCustomFont = {
+                            showTools = false
+                            launchFontPicker()
+                        },
+                        onPresetNameChange = { presetName = it },
+                        onSavePreset = {
+                            val name = presetName.trim().ifBlank { "default" }
+                            presetStore.save(name, streamingEffects)
+                            presetName = name
+                            presetNames = presetStore.names()
+                            coroutineScope.launch {
+                                snackbarHostState.showSnackbar(context.getString(R.string.fx_preset_saved, name))
+                            }
+                        },
+                        onLoadPreset = { name ->
+                            presetStore.load(name)?.let { loaded ->
+                                streamingEffects = loaded
+                                outputPortText = loaded.output.port.toString()
+                                presetName = name
+                                coroutineScope.launch {
+                                    snackbarHostState.showSnackbar(context.getString(R.string.fx_preset_loaded, name))
+                                }
+                            }
+                        },
+                        onObsHostChange = { obsHost = it },
+                        onObsPortChange = { obsPort = it.filter(Char::isDigit).take(5) },
+                        onObsPasswordChange = { obsPassword = it },
+                        onObsSceneChange = { obsScene = it },
+                        onObsSecureChange = { obsSecure = it },
+                        onObsConnect = {
+                            obsClient.connect(
+                                ObsEndpoint(
+                                    host = obsHost,
+                                    port = obsPort.toIntOrNull()?.coerceIn(1, 65535) ?: 4455,
+                                    password = obsPassword,
+                                    secure = obsSecure,
+                                ),
+                            ) { state, message ->
+                                obsState = state
+                                obsStatus = message
+                            }
+                        },
+                        onObsDisconnect = {
+                            obsClient.disconnect()
+                            obsState = ObsConnectionState.Disconnected
+                            obsStatus = context.getString(R.string.obs_status_disconnected)
+                        },
+                        onObsSetScene = {
+                            obsClient.setCurrentScene(obsScene.trim()) { ok, message ->
+                                obsStatus = if (ok) context.getString(R.string.obs_status_scene_changed) else message ?: context.getString(R.string.obs_status_scene_failed)
+                            }
+                        },
+                        onObsStartStream = {
+                            obsClient.startStream { ok, message ->
+                                obsStatus = if (ok) context.getString(R.string.obs_status_stream_started) else message ?: context.getString(R.string.obs_status_stream_start_failed)
+                            }
+                        },
+                        onObsStopStream = {
+                            obsClient.stopStream { ok, message ->
+                                obsStatus = if (ok) context.getString(R.string.obs_status_stream_stopped) else message ?: context.getString(R.string.obs_status_stream_stop_failed)
+                            }
+                        },
+                        onObsStartVirtualCamera = {
+                            obsClient.startVirtualCamera { ok, message ->
+                                obsStatus = if (ok) context.getString(R.string.obs_status_vcam_started) else message ?: context.getString(R.string.obs_status_vcam_start_failed)
+                            }
+                        },
+                        onObsStopVirtualCamera = {
+                            obsClient.stopVirtualCamera { ok, message ->
+                                obsStatus = if (ok) context.getString(R.string.obs_status_vcam_stopped) else message ?: context.getString(R.string.obs_status_vcam_stop_failed)
+                            }
+                        },
+                    )
                 }
             }
 
@@ -1208,10 +2010,15 @@ private suspend fun saveCompositeLayers(
     frozenOverlayOpacity: Float,
     heatmapSimilarityThreshold: Float,
     heatmapPalette: HeatmapPalette,
+    streamingEffects: StreamingEffectsState,
+    pictureInPicture: Bitmap?,
+    logo: Bitmap?,
+    customTypeface: Typeface?,
+    animationPhase: Float,
 ): SaveCompositeResult {
     return try {
         val outBitmap = withContext(Dispatchers.Default) {
-            composeLayers(
+            val base = composeLayers(
                 camBitmap = frozen,
                 previewSize = previewSize,
                 layers = layers,
@@ -1222,6 +2029,16 @@ private suspend fun saveCompositeLayers(
                 heatmapSimilarityThreshold = heatmapSimilarityThreshold,
                 heatmapPalette = heatmapPalette,
             )
+            val decorated = renderStreamingEffects(
+                base = base,
+                pictureInPicture = pictureInPicture,
+                logo = logo,
+                state = streamingEffects,
+                customTypeface = customTypeface,
+                animationPhase = animationPhase,
+            )
+            base.recycle()
+            decorated
         }
 
         withContext(Dispatchers.IO) {

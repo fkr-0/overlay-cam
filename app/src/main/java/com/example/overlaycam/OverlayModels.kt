@@ -50,6 +50,8 @@ internal enum class HeatmapPalette(val label: String) {
 internal enum class PickerTarget {
     Overlay,
     Background,
+    PictureInPicture,
+    Logo,
 }
 
 internal data class AutoAlignResult(
