@@ -76,7 +76,7 @@ adb devices
 make install
 
 # 5) (Optional) launch:
-adb shell monkey -p com.example.overlaycam 1
+adb shell monkey -p dev.fkr.overlaycam 1
 ```
 
 ADB is run on the **host**; all Gradle/SDK heavy lifting happens in **Docker**.

@@ -5,6 +5,24 @@ All notable changes to Overlay Cam are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-10-30
+
+### Added
+
+- **Signed release builds.** `make release-apk` produces a release APK signed with the project's permanent release key (shared with Android DJ Tools; certificate subject `CN=Android DJ Tools`) supplied through `ANDROID_KEYSTORE_*` environment variables or a git-ignored `keystore.properties`. Missing or partial signing configuration fails the build instead of silently falling back to the debug key.
+- `scripts/verify_release_signature.py` checks a release APK for a single v2/v3 signer, rejects the Android debug certificate, and compares the certificate fingerprint with a pinned SHA-256, with unit tests.
+- `docs/release-signing.md` documents the key, local build, verification, and CI setup.
+- A `release` GitHub Actions workflow builds on `v*` tags only: it checks the tag against `versionName` and this changelog, runs the unit tests, signs with keystore secrets, verifies the pinned certificate fingerprint, and publishes the APK with `SHA256SUMS`.
+
+### Changed
+
+- Application ID changed from the placeholder `com.example.overlaycam` to `dev.fkr.overlaycam`. Android treats this as a different app: it installs alongside older builds, and recent scenes, presets and permissions do not carry over. The Kotlin source package is unchanged.
+- Increased Android `versionCode` from 5 to 6 and `versionName` from `0.4.0` to `0.4.1`. No other behavior changes.
+
+### Notes
+
+- Releases up to 0.4.0 were debug-signed. Android will not upgrade them in place to the signed 0.4.1 build, which also has a new application ID: install it fresh and uninstall the old `com.example.overlaycam` app when ready.
+
 ## [0.4.0] - 2026-10-30
 
 ### Added

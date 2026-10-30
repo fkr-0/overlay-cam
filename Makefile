@@ -2,7 +2,7 @@ PROJECT ?= overlay-cam
 IMAGE   ?= overlay-cam:android
 WORKDIR ?= /work
 
-.PHONY: docker docker-nocache build clean test install shell up ci
+.PHONY: docker docker-nocache build clean test install shell up ci release-apk
 
 docker:
 	docker build -t $(IMAGE) .
@@ -54,3 +54,18 @@ up:
 
 # Simulate CI locally
 ci: docker build test
+
+# Signed release APK. Requires ANDROID_KEYSTORE_DIR (directory holding the keystore),
+# ANDROID_KEYSTORE_NAME, ANDROID_KEY_ALIAS, and the passwords exported in the environment
+# (ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_PASSWORD). Passwords are passed by name so they
+# never appear in the command line or process list.
+release-apk:
+	docker run --rm \
+	  -v $$PWD:$(WORKDIR) \
+	  -v $$HOME/.gradle:/.gradle \
+	  -v $$ANDROID_KEYSTORE_DIR:/keystore:ro \
+	  -e ANDROID_KEYSTORE_FILE=/keystore/$$ANDROID_KEYSTORE_NAME \
+	  -e ANDROID_KEYSTORE_PASSWORD -e ANDROID_KEY_ALIAS -e ANDROID_KEY_PASSWORD \
+	  -w $(WORKDIR) \
+	  $(IMAGE) \
+	  bash -lc "bash ./scripts/gradle-in-docker.sh assembleRelease -PrequireReleaseSigning=true"
